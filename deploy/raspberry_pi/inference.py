@@ -44,8 +44,15 @@ class DRPipeline:
         self.b_mu = head["b_mu"]                       # (5,)
         self.b_sigma = np.exp(head["b_log_sigma"])     # (5,)
 
-        self.s1 = _session(models_dir / "ganomaly_int8.onnx", threads)
-        self.s2 = _session(models_dir / "stage2_vbll_int8.onnx", threads)
+        s1_path = models_dir / "ganomaly_fp32.onnx"
+        if not s1_path.exists():
+            s1_path = models_dir / "ganomaly_int8.onnx"
+        s2_path = models_dir / "stage2_vbll_int8.onnx"
+        if not s2_path.exists():
+            s2_path = models_dir / "stage2_vbll_fp32.onnx"
+
+        self.s1 = _session(s1_path, threads)
+        self.s2 = _session(s2_path, threads)
         self.s1_in = self.s1.get_inputs()[0].name
         self.s2_in = self.s2.get_inputs()[0].name
 
