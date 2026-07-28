@@ -1,0 +1,21 @@
+# Datasets
+APTOS/
+IDRiD/
+ODIR-5K/
+*.csv
+*.png
+*.jpg
+*.jpeg
+*.tif
+*.tiff
+*.bmp
+
+# Model weights & temporary cache
+*.pt
+*.pth
+*.onnx
+*.npz
+cache/
+.venv/
+__pycache__/
+.ipynb_checkpoints/

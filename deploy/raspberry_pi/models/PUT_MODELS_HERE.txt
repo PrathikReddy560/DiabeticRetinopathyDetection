@@ -1,0 +1,9 @@
+Place the INT8 artifacts from the Kaggle export notebooks in this folder:
+
+  ganomaly_int8.onnx        (export_stage1_ganomaly.ipynb  -> /kaggle/working/deploy/)
+  stage1_deploy.json        (export_stage1_ganomaly.ipynb  -> /kaggle/working/deploy/)
+  stage2_vbll_int8.onnx     (export_stage2_vbll.ipynb      -> /kaggle/working/deploy/)
+  vbll_head.npz             (export_stage2_vbll.ipynb      -> /kaggle/working/deploy/)
+  stage2_deploy.json        (export_stage2_vbll.ipynb      -> /kaggle/working/deploy/)
+
+See ../README.md for the full flow.
