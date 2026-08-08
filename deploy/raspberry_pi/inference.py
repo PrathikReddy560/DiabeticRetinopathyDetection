@@ -1,18 +1,22 @@
-"""Two-stage DR screening pipeline for Raspberry Pi (CPU-only, INT8 ONNX).
+"""Two-stage DR screening pipeline for Raspberry Pi (CPU-only, FP32 ONNX).
 
-Stage 1: GANomaly gate (INT8 ONNX, 128x128) -> anomaly score -> threshold gate
-Stage 2: EfficientNet-B0 + VBLL (INT8 ONNX, 224x224) -> severity grade 0-4 with
+Stage 1: GANomaly gate (FP32 ONNX, 128x128) -> anomaly score -> threshold gate
+Stage 2: EfficientNet-B0 + VBLL (FP32 ONNX, 224x224) -> severity grade 0-4 with
          Bayesian uncertainty sampled in pure NumPy (no PyTorch on device)
+         + Grad-CAM explainability heatmap
 
 Usage:
     python inference.py /path/to/fundus.jpg --models models
     python inference.py /path/to/fundus.jpg --force   # grade even if gate says normal
 """
 import argparse
+import base64
+import io
 import json
 import time
 from pathlib import Path
 
+import cv2
 import numpy as np
 import onnxruntime as ort
 
@@ -47,14 +51,20 @@ class DRPipeline:
         s1_path = models_dir / "ganomaly_fp32.onnx"
         if not s1_path.exists():
             s1_path = models_dir / "ganomaly_int8.onnx"
-        s2_path = models_dir / "stage2_vbll_int8.onnx"
+        s2_path = models_dir / "stage2_vbll_fp32.onnx"
         if not s2_path.exists():
-            s2_path = models_dir / "stage2_vbll_fp32.onnx"
+            s2_path = models_dir / "stage2_vbll_int8.onnx"
 
         self.s1 = _session(s1_path, threads)
         self.s2 = _session(s2_path, threads)
         self.s1_in = self.s1.get_inputs()[0].name
         self.s2_in = self.s2.get_inputs()[0].name
+
+        # Check if Stage 2 model has the conv_features output (for Grad-CAM)
+        s2_outputs = [o.name for o in self.s2.get_outputs()]
+        self.has_cam = len(s2_outputs) >= 3
+        if self.has_cam:
+            self.cam_output_name = s2_outputs[2]
 
         self.rng = np.random.default_rng(seed)
         self.threshold = float(self.s1_cfg["threshold_youden"])
@@ -63,7 +73,7 @@ class DRPipeline:
         self.passes = int(self.s2_cfg.get("predict_passes", 30))
         self.low_conf_std = float(self.s2_cfg.get("low_conf_std", 0.15))
 
-    # ---------------- stage 1: GANomaly gate ----------------
+    # --------------- stage 1: GANomaly gate ----------------
     def stage1_score(self, img128_bgr):
         x = img128_bgr[..., ::-1].astype(np.float32) / 127.5 - 1.0   # BGR->RGB, [-1,1]
         x = np.ascontiguousarray(x.transpose(2, 0, 1)[None])
@@ -76,20 +86,30 @@ class DRPipeline:
         tz = (top - self.params["top_residual"]["median"]) / self.params["top_residual"]["scale"]
         return 0.5 * lz + 0.5 * tz
 
-    # ---------------- stage 2: severity + VBLL uncertainty ----------------
-    def stage2_grade(self, img224_bgr):
+    # --------------- stage 2: severity + VBLL uncertainty + CAM ----------------
+    def _prepare_s2_input(self, img224_bgr):
+        """Prepare Stage 2 model input tensor from 224x224 BGR image."""
         x = img224_bgr[..., ::-1].astype(np.float32) / 255.0         # BGR->RGB
         x = (x - IMAGENET_MEAN) / IMAGENET_STD
-        x = np.ascontiguousarray(x.transpose(2, 0, 1)[None])
-        _, feats = self.s2.run(None, {self.s2_in: x})
-        f = feats[0]                                                 # (1280,)
+        return np.ascontiguousarray(x.transpose(2, 0, 1)[None])
+
+    def stage2_grade(self, img224_bgr):
+        x = self._prepare_s2_input(img224_bgr)
+
+        if self.has_cam:
+            logits_out, feats, conv_features = self.s2.run(None, {self.s2_in: x})
+        else:
+            logits_out, feats = self.s2.run(None, {self.s2_in: x})
+            conv_features = None
+
+        f = feats[0]                                                   # (1280,)
 
         # 30 posterior weight samples, pure NumPy
         w = self.w_mu[None] + self.w_sigma[None] * self.rng.standard_normal(
             (self.passes, *self.w_mu.shape)).astype(np.float32)
         b = self.b_mu[None] + self.b_sigma[None] * self.rng.standard_normal(
             (self.passes, self.b_mu.shape[0])).astype(np.float32)
-        logits = w @ f + b                                           # (passes, 5)
+        logits = w @ f + b                                             # (passes, 5)
         logits -= logits.max(axis=1, keepdims=True)
         e = np.exp(logits)
         probs = e / e.sum(axis=1, keepdims=True)
@@ -98,7 +118,8 @@ class DRPipeline:
         std_p = probs.std(axis=0)
         grade = int(mean_p.argmax())
         top_std = float(std_p[grade])
-        return {
+
+        result = {
             "grade": grade,
             "grade_name": self.grade_names[grade],
             "probabilities": {self.grade_names[i]: round(float(mean_p[i]), 4) for i in range(5)},
@@ -107,7 +128,62 @@ class DRPipeline:
             "low_confidence": bool(top_std > self.low_conf_std),
         }
 
-    # ---------------- full pipeline ----------------
+        # Generate CAM if conv features available
+        if conv_features is not None:
+            cam_b64, lesion_load = self._generate_cam(conv_features, grade, img224_bgr)
+            result["cam_heatmap"] = cam_b64
+            result["cam_lesion_load"] = round(lesion_load, 4)
+
+        return result
+
+    def _generate_cam(self, conv_features, predicted_grade, img224_bgr):
+        """Generate Class Activation Map (CAM) using VBLL posterior mean weights.
+
+        For our architecture (GlobalAvgPool -> Linear), CAM is mathematically
+        equivalent to Grad-CAM: CAM_c = sum_k(w_mu[c,k] * feature_map[k,:,:]).
+
+        Args:
+            conv_features: (1, 1280, 7, 7) spatial features from last conv block
+            predicted_grade: integer 0-4
+            img224_bgr: original 224x224 BGR image for overlay
+
+        Returns:
+            (cam_b64, lesion_load): base64 PNG of heatmap overlay, and lesion fraction
+        """
+        feat = conv_features[0]   # (1280, 7, 7)
+        weights = self.w_mu[predicted_grade]  # (1280,)
+
+        # Weighted combination of feature maps -> (7, 7)
+        cam = np.tensordot(weights, feat, axes=([0], [0]))  # (7, 7)
+
+        # ReLU: only keep positive activations (regions that contribute TO this class)
+        cam = np.maximum(cam, 0)
+
+        # Normalize to [0, 1]
+        cam_max = cam.max()
+        if cam_max > 1e-8:
+            cam = cam / cam_max
+        else:
+            cam = np.zeros_like(cam)
+
+        # Upscale to 224x224
+        cam_resized = cv2.resize(cam.astype(np.float32), (224, 224), interpolation=cv2.INTER_CUBIC)
+
+        # Compute lesion load: fraction of retinal area with CAM > 0.6
+        lesion_thr = 0.6
+        lesion_load = float((cam_resized > lesion_thr).mean())
+
+        # Create heatmap overlay
+        heatmap = cv2.applyColorMap((cam_resized * 255).astype(np.uint8), cv2.COLORMAP_JET)
+        overlay = cv2.addWeighted(img224_bgr, 0.6, heatmap, 0.4, 0)
+
+        # Encode as base64 PNG
+        _, buf = cv2.imencode(".png", overlay)
+        cam_b64 = base64.b64encode(buf.tobytes()).decode("ascii")
+
+        return cam_b64, lesion_load
+
+    # --------------- full pipeline ----------------
     def run(self, image_path, force_grade=False):
         timings = {}
         t0 = time.perf_counter()
@@ -130,6 +206,12 @@ class DRPipeline:
             t0 = time.perf_counter()
             s2 = self.stage2_grade(img224)
             timings["stage2_ms"] = round((time.perf_counter() - t0) * 1000, 1)
+
+            # Move cam fields to top-level result
+            if "cam_heatmap" in s2:
+                result["cam_heatmap"] = s2.pop("cam_heatmap")
+                result["cam_lesion_load"] = s2.pop("cam_lesion_load")
+
             result["severity"] = s2
             result["action"] = ("Refer for Manual Review" if s2["low_confidence"]
                                 else f"Proceed - grade {s2['grade']} ({s2['grade_name']})")
@@ -142,15 +224,22 @@ class DRPipeline:
 
 
 def main():
-    ap = argparse.ArgumentParser(description="DR screening pipeline (INT8, CPU-only)")
+    ap = argparse.ArgumentParser(description="DR screening pipeline (FP32, CPU-only)")
     ap.add_argument("image", help="path to a fundus image")
-    ap.add_argument("--models", default="models", help="directory with the INT8 artifacts")
+    ap.add_argument("--models", default="models", help="directory with model artifacts")
     ap.add_argument("--threads", type=int, default=4)
     ap.add_argument("--force", action="store_true", help="grade even if the gate says normal")
     args = ap.parse_args()
 
     pipe = DRPipeline(args.models, threads=args.threads)
-    print(json.dumps(pipe.run(args.image, force_grade=args.force), indent=2))
+    result = pipe.run(args.image, force_grade=args.force)
+
+    # For CLI output, don't print the base64 blob
+    display = {k: v for k, v in result.items() if k != "cam_heatmap"}
+    if "cam_lesion_load" in result:
+        display["cam_lesion_load"] = result["cam_lesion_load"]
+        display["cam_heatmap"] = f"<base64 PNG, {len(result['cam_heatmap'])} chars>"
+    print(json.dumps(display, indent=2))
 
 
 if __name__ == "__main__":

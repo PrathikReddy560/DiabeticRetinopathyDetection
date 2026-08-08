@@ -10,6 +10,9 @@ ODIR-5K/
 *.tiff
 *.bmp
 
+# Extracted checkpoint folders
+stage2_vbll_best/
+
 # Model weights & temporary cache
 *.pt
 *.pth
@@ -19,3 +22,8 @@ cache/
 .venv/
 __pycache__/
 .ipynb_checkpoints/
+
+# Allow deployed model files
+!deploy/raspberry_pi/models/*.onnx
+!deploy/raspberry_pi/models/*.npz
+!deploy/raspberry_pi/models/*.json
