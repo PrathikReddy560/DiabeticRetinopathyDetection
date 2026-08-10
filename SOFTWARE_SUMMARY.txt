@@ -1,0 +1,244 @@
+================================================================================
+  RetinaAI — Software Development Summary
+  Edge-Deployable Autonomous Diabetic Retinopathy Screening System
+================================================================================
+
+
+================================================================================
+STAGE 1: GANomaly MODEL (Anomaly Detection Gate)
+================================================================================
+
+What is it?
+-----------
+An anomaly detection gate — its job is to decide:
+"Is this fundus image normal or does it show signs of disease?"
+
+Did we build it from scratch?
+-----------------------------
+YES, the GANomaly architecture was built from scratch in PyTorch.
+It is NOT a pretrained model from anywhere. We designed:
+
+  - Encoder 1: 5 strided convolutional layers that compress a 128x128x3
+    fundus image into a 128-dimensional latent vector z
+  - Decoder: Transposes z back into a reconstructed image x̂
+  - Encoder 2: Same architecture as Encoder 1, but encodes the
+    reconstructed image into a second latent vector ẑ
+
+How does it work?
+-----------------
+It's trained using ONE-CLASS LEARNING — we only fed it healthy, normal
+fundus images. So it learns "what a normal retina looks like". When a
+diseased image comes in:
+
+  - The reconstruction is poor (it's never seen lesions before)
+  - The latent error ||z - ẑ||² is high
+  - The pixel residual |x - x̂| is also high
+
+We combine both into an ANOMALY SCORE. If the score exceeds the threshold
+(0.6282, chosen via Youden's J statistic), the image is flagged and sent
+to Stage 2.
+
+Training Details:
+  - Loss Function:      Adversarial + L1 Reconstruction + Latent MSE
+  - Optimizer:          Adam, lr=2e-4, β=(0.5, 0.999)
+  - Epochs:             50
+  - Image Size:         128x128
+  - Training Data:      Healthy images only (one-class) from IDRiD + ODIR-5K
+  - GPU:                NVIDIA Tesla T4 (Kaggle)
+
+Results:
+  - Test AUC:           0.9093
+  - Deployed Threshold: 0.6282
+  - Inference Latency:  ~30 ms (CPU)
+  - Model Size:         14.6 MB (FP32 ONNX)
+
+
+================================================================================
+STAGE 2: EfficientNet-B0 + VBLL (Severity Grading with Uncertainty)
+================================================================================
+
+What is it?
+-----------
+A 5-class severity grader — classifies DR from Grade 0 (No DR) to
+Grade 4 (Proliferative DR) WITH uncertainty quantification.
+
+Did we build it from scratch?
+-----------------------------
+PARTIALLY. It's a hybrid:
+
+  EfficientNet-B0 Backbone:
+    - PRETRAINED on ImageNet (1.2M natural images)
+    - Then FINE-TUNED on our fundus dataset
+    - We used torchvision.models.efficientnet_b0(weights="IMAGENET1K_V1")
+    - All layers were unfrozen and trained with differential learning rates
+
+  VBLL Head (Variational Bayesian Last Layer):
+    - BUILT FROM SCRATCH — this is the novel research contribution
+    - We replaced the standard Linear(1280→5) classification head with a
+      custom Variational Bayesian Last Layer
+
+  Grad-CAM Engine:
+    - BUILT FROM SCRATCH
+    - We patched the ONNX model to extract 1280x7x7 spatial feature maps
+      and compute class activation maps using VBLL weights
+
+What is VBLL? (The Novel Part)
+------------------------------
+Instead of fixed weights W in the last layer, VBLL learns a GAUSSIAN
+DISTRIBUTION over weights:
+
+    q(W) = N(μ_W, diag(σ²_W))
+
+  - 4 learned parameter matrices:
+      w_mu       (5 x 1280)   — weight means
+      w_log_sigma (5 x 1280)  — weight log-standard-deviations
+      b_mu       (5,)         — bias means
+      b_log_sigma (5,)        — bias log-standard-deviations
+
+  - Training: Uses the ELBO loss (Evidence Lower Bound) instead of
+    standard cross-entropy:
+      ELBO = E_q[log p(y|x,W)] - KL(q(W)||p(W)) / N
+
+  - Inference: Draws 30 weight samples from the posterior → 30 different
+    predictions → mean probabilities + standard deviation = calibrated
+    uncertainty
+
+  - Safety flag: If σ of the top predicted class > 0.15 → automatically
+    outputs "Refer for Manual Review"
+
+Training Details:
+  - Loss Function:              Negative ELBO
+  - Optimizer:                  AdamW, backbone lr=3e-5, VBLL head lr=3e-4
+  - Schedule:                   CosineAnnealingLR, 45 epochs
+  - Batch Size:                 32
+  - Image Size:                 224x224
+  - Weight Samples (training):  10 per step (reparameterization trick)
+  - Weight Samples (inference): 30 per image
+  - Augmentation:               HFlip, VFlip, Rotate(±30°), BrightnessContrast
+  - Class Imbalance:            WeightedRandomSampler
+  - GPU:                        NVIDIA Tesla T4 (Kaggle)
+
+Results:
+  - Test Accuracy:              0.8321 (83.21%)
+  - Quadratic Weighted Kappa:   0.8783
+  - Confidence (typical):       95-100% for clear cases
+  - Low-confidence referral:    Cases with σ > 0.15 flagged
+  - Inference Latency:          ~75 ms (CPU, includes Grad-CAM)
+  - Model Size:                 16.0 MB backbone + 52 KB VBLL head
+
+
+================================================================================
+DATASETS USED (Both Stages)
+================================================================================
+
+  Dataset       | Images  | Grades | Role
+  --------------|---------|--------|------------------------------------------
+  IDRiD         | 516     | 0-4    | Primary graded dataset
+  APTOS 2019    | 2,930   | 0-4    | Large-scale graded dataset
+  ODIR-5K       | 1,000   | 0 only | Extra healthy images for GANomaly training
+  --------------|---------|--------|------------------------------------------
+  Total         | 4,446   |   —    | After dedup, 70/15/15 stratified split
+
+
+================================================================================
+GRAD-CAM EXPLAINABILITY (Explainable AI / XAI)
+================================================================================
+
+What is it?
+-----------
+A visual explanation of WHY the model predicted a specific grade.
+
+Did we build it from scratch?
+-----------------------------
+YES. We didn't use any Grad-CAM library. Our implementation:
+
+  1. Patched the ONNX model graph (using the onnx library) to expose the
+     last convolutional feature maps (1280 x 7 x 7)
+  2. Multiplied them by the VBLL posterior mean weights (w_mu[predicted_class])
+  3. Applied ReLU + bicubic upscaling to 224x224
+  4. Overlaid as a JET colormap heatmap on the original fundus image
+  5. Computed Lesion Activation Load % (fraction of retina with CAM > 0.6)
+
+What it produces:
+  - Heatmap overlay:   Red/yellow regions = where the model is "looking"
+  - Lesion load %:     Quantifies disease extent (e.g., 17.1% = widespread)
+  - Clinical text:     Grade-specific explanation of likely pathology
+                       (microaneurysms, hemorrhages, exudates, neovascularization)
+
+
+================================================================================
+EDGE DEPLOYMENT ENGINEERING
+================================================================================
+
+Framework-Free Execution on Raspberry Pi 5:
+  - ZERO PyTorch or TensorFlow on device
+  - Backbone runs via ONNX Runtime (CPUExecutionProvider)
+  - VBLL 30-pass posterior sampling runs in pure NumPy
+  - Total model footprint: ~30 MB FP32 ONNX
+  - Peak RAM usage: < 870 MB (well within 4GB Pi 5 RAM)
+
+INT8 Quantization — Evaluated and Rejected:
+  - GANomaly INT8:  AUC collapsed from 0.9093 → 0.5588
+  - VBLL INT8:      QWK collapsed from 0.8783 → 0.1721
+  - Root cause:     Fine-grained variance parameters (σ ≈ 0.007) zeroed
+                    by INT8 quantization grid
+  - Decision:       Deploy FP32 ONNX (30 MB fits easily, latency still < 200ms)
+
+Pipeline Latency Breakdown:
+  - Preprocessing (Crop + CLAHE):         50.0 ms
+  - Stage 1 GANomaly Gate:                32.4 ms
+  - Stage 2 VBLL + Grad-CAM:             75.3 ms
+  - TOTAL:                               ~157.7 ms (under 200 ms budget)
+
+
+================================================================================
+CLINICAL WEB APPLICATION (demo_app.py)
+================================================================================
+
+Built with Flask + Vanilla HTML/CSS/JavaScript:
+
+  - Drag & Drop Upload:     Instant fundus image preview
+  - Dual-Stage Dashboard:   Gate decision, Grade badge (color-coded 0-4),
+                            Bayesian probability bars, timing breakdown
+  - Grad-CAM Visualizer:    Side-by-side original image and heatmap overlay
+  - Lesion Load Meter:      % retinal area with active lesions (thresholds at 1%, 8%)
+  - Clinical Interpretation: Automated grade-specific medical explanations
+  - Safety Disclaimer:      "AI screening is intended as clinical decision support"
+
+
+================================================================================
+HARDWARE BILL OF MATERIALS (Total Cost: ₹10,390)
+================================================================================
+
+  Component                              | Cost (INR)
+  ---------------------------------------|----------
+  Raspberry Pi 5 (4GB RAM)              | ₹7,300
+  Official Active Cooler                 | ₹490
+  20D Ophthalmic Condensing Lens         | ₹900
+  50:50 Beam Splitter Plate (20x20mm)    | ₹700
+  Dual Illumination Module (IR + White)  | ₹300
+  3D-Printed Frame Mount                 | ₹700
+  ---------------------------------------|----------
+  TOTAL                                  | ₹10,390
+
+
+================================================================================
+SUMMARY — WHAT WE BUILT vs WHAT WE USED
+================================================================================
+
+  Component                        | Built from Scratch? | Technology
+  ---------------------------------|---------------------|------------------------
+  GANomaly Generator Architecture  | YES                 | PyTorch
+  GANomaly Training Pipeline       | YES                 | PyTorch + Kaggle T4
+  EfficientNet-B0 Backbone         | NO (Pretrained),    | torchvision
+                                   | YES (Fine-tuned)    |
+  VBLL Bayesian Head               | YES (novel)         | Custom PyTorch module
+  ELBO Loss Function               | YES                 | Custom implementation
+  Grad-CAM Engine                  | YES                 | ONNX graph patch + NumPy
+  ONNX Export Pipeline             | YES                 | PyTorch → ONNX opset 17
+  NumPy Posterior Sampling (Pi)    | YES                 | Pure NumPy (no PyTorch)
+  Flask Web Application            | YES                 | Flask + HTML/CSS/JS
+  Image Preprocessing (CLAHE)      | YES                 | OpenCV
+  Clinical Decision Logic          | YES                 | Python
+
+================================================================================
