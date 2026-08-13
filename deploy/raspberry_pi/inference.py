@@ -128,6 +128,39 @@ class DRPipeline:
             "low_confidence": bool(top_std > self.low_conf_std),
         }
 
+        # ---- Multi-criteria rejection (aligned with Base Paper 1) ----
+        # 1. Maximum Softmax Probability (MSP)
+        msp = float(mean_p.max())
+        # 2. Predictive Entropy: H = -sum(p * log(p))
+        eps = 1e-10
+        entropy = float(-np.sum(mean_p * np.log(mean_p + eps)))
+        # 3. Top-2 Gap: difference between top-1 and top-2 predictions
+        sorted_p = np.sort(mean_p)[::-1]
+        top2_gap = float(sorted_p[0] - sorted_p[1])
+
+        # Rejection triggers (any one → reject)
+        reasons = []
+        if msp < 0.70:
+            reasons.append("Low maximum softmax probability (MSP < 70%)")
+        if entropy > 0.5:
+            reasons.append("High predictive entropy (H > 0.5)")
+        if top2_gap < 0.20:
+            reasons.append("Ambiguous grade boundary (top-2 gap < 20%)")
+
+        rejected = len(reasons) > 0
+        result["rejection"] = {
+            "rejected": rejected,
+            "reason": reasons[0] if reasons else "None",
+            "all_reasons": reasons,
+            "msp": round(msp, 4),
+            "entropy": round(entropy, 4),
+            "top2_gap": round(top2_gap, 4),
+            "recommendation": (
+                "Image rejected — manual ophthalmologist review required"
+                if rejected else "Automated diagnosis accepted"
+            ),
+        }
+
         # Generate CAM if conv features available
         if conv_features is not None:
             cam_b64, lesion_load = self._generate_cam(conv_features, grade, img224_bgr)
@@ -213,8 +246,14 @@ class DRPipeline:
                 result["cam_lesion_load"] = s2.pop("cam_lesion_load")
 
             result["severity"] = s2
-            result["action"] = ("Refer for Manual Review" if s2["low_confidence"]
-                                else f"Proceed - grade {s2['grade']} ({s2['grade_name']})")
+
+            # Use rejection status for action (Task 2)
+            if s2.get("rejection", {}).get("rejected", False):
+                result["action"] = "REJECTED — Model unsure, refer for manual review"
+            elif s2["low_confidence"]:
+                result["action"] = "Refer for Manual Review"
+            else:
+                result["action"] = f"Proceed - grade {s2['grade']} ({s2['grade_name']})"
         else:
             result["action"] = "NORMAL, stop here"
 

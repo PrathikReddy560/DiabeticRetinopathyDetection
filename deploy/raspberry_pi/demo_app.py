@@ -1,546 +1,1687 @@
-"""Flask web application for the Edge-Deployable DR Screening Pipeline.
-
-Provides a modern clinical web UI with Grad-CAM explainability.
-
-Run locally or on Raspberry Pi 5:
-    python demo_app.py --models models --host 0.0.0.0 --port 5000
-"""
 import argparse
 import base64
+import hashlib
+import json
 import os
+import sqlite3
 import tempfile
+import uuid
+import random
+from datetime import datetime
 from pathlib import Path
-
-from flask import Flask, jsonify, render_template_string, request
-
+from flask import Flask, jsonify, redirect, render_template_string, request, session, url_for
+from functools import wraps
 from inference import DRPipeline
 
-HTML_TEMPLATE = r"""<!doctype html>
+AUTH_TEMPLATE = r"""<!DOCTYPE html>
 <html lang="en">
 <head>
-  <meta charset="utf-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>RetinaAI — Edge Diabetic Retinopathy Screening</title>
-  <meta name="description" content="AI-powered diabetic retinopathy screening with Grad-CAM explainability on Raspberry Pi 5">
-  <link rel="preconnect" href="https://fonts.googleapis.com">
-  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-  <link href="https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;500;600;700&display=swap" rel="stylesheet">
-  <style>
-    :root {
-      --bg: #0b0f19;
-      --card-bg: rgba(22, 30, 49, 0.7);
-      --card-border: rgba(255, 255, 255, 0.08);
-      --accent-cyan: #06b6d4;
-      --accent-blue: #3b82f6;
-      --accent-emerald: #10b981;
-      --accent-amber: #f59e0b;
-      --accent-rose: #f43f5e;
-      --text-main: #f3f4f6;
-      --text-muted: #9ca3af;
-    }
-    * { box-sizing: border-box; margin: 0; padding: 0; }
-    body {
-      font-family: 'Outfit', sans-serif;
-      background: var(--bg);
-      background-image: radial-gradient(circle at 20% 10%, rgba(6, 182, 212, 0.08) 0%, transparent 40%),
-                        radial-gradient(circle at 80% 80%, rgba(59, 130, 246, 0.06) 0%, transparent 40%);
-      color: var(--text-main);
-      min-height: 100vh;
-      padding: 1.5rem 1rem;
-    }
-    .container { max-width: 1200px; margin: 0 auto; }
-    header {
-      display: flex; align-items: center; justify-content: space-between;
-      margin-bottom: 1.5rem; padding-bottom: 1rem;
-      border-bottom: 1px solid var(--card-border);
-    }
-    .brand { display: flex; align-items: center; gap: 0.75rem; }
-    .brand-logo {
-      width: 44px; height: 44px;
-      background: linear-gradient(135deg, var(--accent-cyan), var(--accent-blue));
-      border-radius: 12px; display: grid; place-items: center;
-      font-weight: 700; font-size: 1.5rem; color: #fff;
-      box-shadow: 0 0 24px rgba(6, 182, 212, 0.4);
-    }
-    .brand-title h1 { font-size: 1.35rem; font-weight: 700; letter-spacing: -0.02em; }
-    .brand-title p { font-size: 0.82rem; color: var(--text-muted); }
-    .badge-edge {
-      background: rgba(6, 182, 212, 0.12); color: var(--accent-cyan);
-      border: 1px solid rgba(6, 182, 212, 0.25); padding: 0.35rem 0.75rem;
-      border-radius: 20px; font-size: 0.78rem; font-weight: 600;
-    }
-    .card {
-      background: var(--card-bg); backdrop-filter: blur(16px);
-      -webkit-backdrop-filter: blur(16px);
-      border: 1px solid var(--card-border); border-radius: 20px;
-      padding: 1.5rem; box-shadow: 0 8px 32px rgba(0,0,0,0.35);
-    }
-    .card-title {
-      font-size: 0.95rem; font-weight: 600; margin-bottom: 1rem;
-      display: flex; align-items: center; gap: 0.5rem;
-      text-transform: uppercase; letter-spacing: 0.04em; color: var(--text-muted);
-    }
-    .top-grid { display: grid; grid-template-columns: 340px 1fr; gap: 1.5rem; }
-    @media (max-width: 900px) { .top-grid { grid-template-columns: 1fr; } }
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>RetinaAI - Authentication</title>
+    
+    <!-- Google Fonts: IBM Plex Sans -->
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+    
+    <!-- Material Symbols Outlined -->
+    <link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:wght,FILL@100..700,0..1&display=swap" rel="stylesheet" />
 
-    /* Upload Panel */
-    .dropzone {
-      border: 2px dashed rgba(255,255,255,0.12); border-radius: 14px;
-      padding: 2rem 1rem; text-align: center; cursor: pointer;
-      transition: all 0.25s; background: rgba(0,0,0,0.2);
-    }
-    .dropzone:hover, .dropzone.dragover {
-      border-color: var(--accent-cyan); background: rgba(6, 182, 212, 0.05);
-    }
-    .dropzone-icon { font-size: 2.5rem; margin-bottom: 0.5rem; opacity: 0.7; }
-    .dropzone p { font-size: 0.88rem; color: var(--text-muted); }
-    .dropzone span { color: var(--accent-cyan); font-weight: 600; }
-    #fileInput { display: none; }
-    .btn-submit {
-      width: 100%; margin-top: 1.25rem; padding: 0.85rem; border: none;
-      border-radius: 12px;
-      background: linear-gradient(135deg, var(--accent-cyan), var(--accent-blue));
-      color: white; font-family: inherit; font-size: 1rem; font-weight: 600;
-      cursor: pointer; transition: opacity 0.2s, transform 0.1s;
-      box-shadow: 0 4px 15px rgba(6, 182, 212, 0.3);
-    }
-    .btn-submit:hover { opacity: 0.92; transform: translateY(-1px); }
-    .btn-submit:disabled { opacity: 0.4; cursor: not-allowed; transform: none; }
-    .preview-container { margin-top: 1rem; display: none; text-align: center; }
-    .preview-container img {
-      max-width: 100%; max-height: 200px; border-radius: 12px;
-      border: 1px solid var(--card-border);
-    }
+    <!-- Tailwind CSS -->
+    <script src="https://cdn.tailwindcss.com?plugins=forms,container-queries"></script>
+    <script>
+        tailwind.config = {
+            theme: {
+                extend: {
+                    colors: {
+                        'clinical-blue': '#005596',
+                        'clinical-green': '#008a4b',
+                        'clinical-orange': '#f05a28',
+                        'bg-light': '#f8fafc',
+                        'card-bg': '#ffffff',
+                        'text-primary': '#1e293b',
+                        'text-muted': '#64748b',
+                        'border-color': '#e2e8f0'
+                    },
+                    fontFamily: {
+                        sans: ['IBM Plex Sans', 'sans-serif'],
+                    }
+                }
+            }
+        }
+    </script>
+    
+    <style>
+        body {
+            font-family: 'IBM Plex Sans', sans-serif;
+            background-color: #f8fafc;
+            color: #1e293b;
+        }
+        
+        .fade-in {
+            animation: fadeIn 0.4s ease-in-out;
+        }
+        
+        @keyframes fadeIn {
+            from { opacity: 0; transform: translateY(10px); }
+            to { opacity: 1; transform: translateY(0); }
+        }
+        
+        .tab-btn {
+            border-bottom: 2px solid transparent;
+            transition: all 0.2s;
+        }
+        .tab-btn.active {
+            border-bottom: 2px solid #005596;
+            color: #005596;
+            font-weight: 600;
+        }
 
-    /* Placeholder */
-    .placeholder-state {
-      display: flex; flex-direction: column; align-items: center;
-      justify-content: center; min-height: 320px;
-      color: var(--text-muted); text-align: center;
-    }
-    .placeholder-icon { font-size: 3rem; margin-bottom: 1rem; opacity: 0.25; }
-
-    /* Action Banner */
-    .action-banner {
-      padding: 1rem 1.25rem; border-radius: 14px; font-weight: 600;
-      font-size: 1.05rem; display: flex; align-items: center;
-      justify-content: space-between; margin-bottom: 1.25rem;
-    }
-    .banner-normal { background: rgba(16, 185, 129, 0.12); border: 1px solid rgba(16, 185, 129, 0.25); color: #34d399; }
-    .banner-proceed { background: rgba(59, 130, 246, 0.12); border: 1px solid rgba(59, 130, 246, 0.25); color: #60a5fa; }
-    .banner-referral { background: rgba(244, 63, 94, 0.12); border: 1px solid rgba(244, 63, 94, 0.25); color: #fb7185; }
-
-    /* Metrics */
-    .metrics-grid { display: grid; grid-template-columns: repeat(4, 1fr); gap: 0.75rem; margin-bottom: 1.25rem; }
-    @media (max-width: 700px) { .metrics-grid { grid-template-columns: repeat(2, 1fr); } }
-    .metric-card {
-      background: rgba(0,0,0,0.25); border: 1px solid var(--card-border);
-      border-radius: 12px; padding: 0.85rem;
-    }
-    .metric-label {
-      font-size: 0.7rem; color: var(--text-muted);
-      text-transform: uppercase; letter-spacing: 0.05em; margin-bottom: 0.2rem;
-    }
-    .metric-value { font-size: 1.15rem; font-weight: 700; }
-    .grade-badge {
-      display: inline-block; padding: 0.25rem 0.65rem;
-      border-radius: 8px; font-size: 0.82rem; font-weight: 700;
-    }
-    .grade-0 { background: rgba(16, 185, 129, 0.2); color: #34d399; }
-    .grade-1 { background: rgba(59, 130, 246, 0.2); color: #60a5fa; }
-    .grade-2 { background: rgba(245, 158, 11, 0.2); color: #fbbf24; }
-    .grade-3 { background: rgba(249, 115, 22, 0.2); color: #fb923c; }
-    .grade-4 { background: rgba(244, 63, 94, 0.2); color: #f87171; }
-
-    /* Explainability Section */
-    .explain-section { margin-top: 1.25rem; }
-    .explain-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 1.25rem; margin-top: 0.75rem; }
-    @media (max-width: 700px) { .explain-grid { grid-template-columns: 1fr; } }
-    .explain-card {
-      background: rgba(0,0,0,0.2); border: 1px solid var(--card-border);
-      border-radius: 14px; overflow: hidden;
-    }
-    .explain-card img {
-      width: 100%; height: auto; display: block;
-    }
-    .explain-card-label {
-      padding: 0.6rem 0.85rem; font-size: 0.8rem; font-weight: 600;
-      color: var(--text-muted); display: flex; align-items: center; gap: 0.4rem;
-    }
-
-    /* Clinical Explanation */
-    .clinical-box {
-      background: rgba(6, 182, 212, 0.06); border: 1px solid rgba(6, 182, 212, 0.15);
-      border-radius: 14px; padding: 1.15rem; margin-top: 1.25rem;
-    }
-    .clinical-box h3 {
-      font-size: 0.85rem; font-weight: 600; color: var(--accent-cyan);
-      margin-bottom: 0.6rem; display: flex; align-items: center; gap: 0.4rem;
-      text-transform: uppercase; letter-spacing: 0.04em;
-    }
-    .clinical-box p { font-size: 0.88rem; line-height: 1.6; color: var(--text-muted); }
-    .clinical-box strong { color: var(--text-main); }
-    .clinical-box .highlight {
-      display: inline-block; padding: 0.15rem 0.5rem; border-radius: 6px;
-      font-weight: 600; font-size: 0.82rem;
-    }
-
-    /* Probability Bars */
-    .chart-box { margin-top: 1.25rem; }
-    .chart-title { font-size: 0.85rem; font-weight: 600; margin-bottom: 0.75rem; color: var(--text-muted); }
-    .bar-row { margin-bottom: 0.6rem; }
-    .bar-header { display: flex; justify-content: space-between; font-size: 0.82rem; margin-bottom: 0.25rem; }
-    .bar-track { background: rgba(255,255,255,0.05); height: 8px; border-radius: 4px; overflow: hidden; }
-    .bar-fill {
-      height: 100%; border-radius: 4px;
-      transition: width 0.7s cubic-bezier(0.4, 0, 0.2, 1);
-    }
-
-    /* Lesion Load Meter */
-    .lesion-meter { margin-top: 1rem; }
-    .lesion-meter-label { font-size: 0.82rem; margin-bottom: 0.3rem; display: flex; justify-content: space-between; }
-    .lesion-meter-track {
-      background: rgba(255,255,255,0.06); height: 10px; border-radius: 5px;
-      overflow: hidden; position: relative;
-    }
-    .lesion-meter-fill {
-      height: 100%; border-radius: 5px;
-      transition: width 0.7s cubic-bezier(0.4, 0, 0.2, 1);
-    }
-    .lesion-meter-markers {
-      position: relative; height: 14px; font-size: 0.65rem; color: var(--text-muted);
-    }
-    .lesion-marker {
-      position: absolute; top: 2px;
-      border-left: 1px dashed rgba(255,255,255,0.15); padding-left: 4px;
-    }
-
-    /* Timing */
-    .timing-table { width: 100%; border-collapse: collapse; font-size: 0.82rem; margin-top: 0.75rem; }
-    .timing-table td { padding: 0.4rem 0; border-bottom: 1px solid rgba(255,255,255,0.04); color: var(--text-muted); }
-    .timing-table tr:last-child td { border: none; font-weight: 700; color: var(--text-main); }
-    .timing-table td:last-child { text-align: right; font-variant-numeric: tabular-nums; }
-
-    /* Loader */
-    .loader-overlay {
-      display: none; position: fixed; inset: 0; background: rgba(11,15,25,0.85);
-      z-index: 100; place-items: center;
-    }
-    .loader-overlay.active { display: grid; }
-    .loader-content { text-align: center; }
-    .loader-ring {
-      width: 56px; height: 56px; margin: 0 auto 1rem;
-      border: 3px solid rgba(255,255,255,0.08); border-radius: 50%;
-      border-top-color: var(--accent-cyan);
-      animation: spin 0.9s ease-in-out infinite;
-    }
-    @keyframes spin { to { transform: rotate(360deg); } }
-    .loader-text { font-size: 0.95rem; color: var(--text-muted); }
-    .loader-stage { font-size: 0.82rem; color: var(--accent-cyan); margin-top: 0.5rem; font-weight: 600; }
-
-    /* Fade-in */
-    .fade-in { animation: fadeIn 0.5s ease-out; }
-    @keyframes fadeIn { from { opacity: 0; transform: translateY(12px); } to { opacity: 1; transform: translateY(0); } }
-  </style>
+        .pulse-ring {
+            animation: pulse-eye 2s infinite ease-out;
+            transform-origin: center;
+        }
+        .scan-line {
+            animation: eye-scan 3s infinite linear;
+            transform-origin: center;
+        }
+        @keyframes pulse-eye {
+            0% { transform: scale(0.8); opacity: 0.8; }
+            100% { transform: scale(1.3); opacity: 0; }
+        }
+        @keyframes eye-scan {
+            0% { transform: translateY(-20px); opacity: 0; }
+            10% { opacity: 1; }
+            90% { opacity: 1; }
+            100% { transform: translateY(20px); opacity: 0; }
+        }
+        .retina-logo { transition: transform 0.3s; }
+        .retina-logo:hover { transform: scale(1.05); }
+    </style>
 </head>
-<body>
-  <div class="container">
-    <header>
-      <div class="brand">
-        <div class="brand-logo">R</div>
-        <div class="brand-title">
-          <h1>RetinaAI Screening</h1>
-          <p>Edge AI Diagnostic Device &mdash; Raspberry Pi 5</p>
+<body class="min-h-screen flex m-0">
+
+    <!-- Left Hero Area (Hidden on mobile) -->
+    <div class="hidden md:flex flex-col justify-center w-1/2 p-12 text-white" style="background: linear-gradient(135deg, #005596, #003d6b);">
+        
+        <!-- Eye Logo Inverse Variant -->
+        <svg viewBox="0 0 100 100" xmlns="http://www.w3.org/2000/svg" class="retina-logo h-20 w-20 mb-8 self-start text-white">
+            <path d="M10,50 Q50,10 90,50 Q50,90 10,50 Z" fill="none" stroke="currentColor" stroke-width="4"/>
+            <circle cx="50" cy="50" r="20" fill="none" stroke="currentColor" stroke-width="4"/>
+            <circle cx="50" cy="50" r="8" fill="currentColor" class="pulse-ring"/>
+            <circle cx="50" cy="50" r="8" fill="currentColor"/>
+            <line x1="20" y1="50" x2="80" y2="50" stroke="#00ffff" stroke-width="2" class="scan-line" opacity="0.8"/>
+        </svg>
+
+        <h1 class="text-5xl font-bold mb-4">RetinaAI</h1>
+        <p class="text-xl mb-12 text-blue-100">Edge AI Diabetic Retinopathy Screening</p>
+        
+        <div class="space-y-6">
+            <div class="flex items-center gap-4">
+                <span class="material-symbols-outlined text-3xl">psychology</span>
+                <span class="text-lg">AI-Powered Screening</span>
+            </div>
+            <div class="flex items-center gap-4">
+                <span class="material-symbols-outlined text-3xl">visibility</span>
+                <span class="text-lg">Grad-CAM Explainability</span>
+            </div>
+            <div class="flex items-center gap-4">
+                <span class="material-symbols-outlined text-3xl">router</span>
+                <span class="text-lg">Edge Deployment Ready</span>
+            </div>
         </div>
-      </div>
-      <div class="badge-edge">&#x1f4a1; XAI-Enabled &middot; Pi 5 (4GB)</div>
+    </div>
+
+    <!-- Right Auth Area -->
+    <div class="w-full md:w-1/2 flex flex-col justify-center items-center p-6 sm:p-12 fade-in">
+        <div class="w-full max-w-md bg-white rounded-xl shadow-lg border border-border-color p-8 relative">
+            <div class="flex flex-col items-center mb-8">
+                
+                <!-- Eye Logo Normal Variant -->
+                <svg viewBox="0 0 100 100" xmlns="http://www.w3.org/2000/svg" class="retina-logo h-12 w-12 mb-3 md:hidden text-clinical-blue">
+                    <path d="M10,50 Q50,10 90,50 Q50,90 10,50 Z" fill="none" stroke="currentColor" stroke-width="4"/>
+                    <circle cx="50" cy="50" r="20" fill="none" stroke="currentColor" stroke-width="4"/>
+                    <circle cx="50" cy="50" r="8" fill="currentColor" class="pulse-ring"/>
+                    <circle cx="50" cy="50" r="8" fill="currentColor"/>
+                    <line x1="20" y1="50" x2="80" y2="50" stroke="#00ffff" stroke-width="2" class="scan-line" opacity="0.8"/>
+                </svg>
+
+                <h2 class="text-2xl font-bold text-clinical-blue md:hidden">RetinaAI</h2>
+                
+                <div class="flex w-full mt-6 border-b border-border-color">
+                    <button onclick="switchTab('login')" id="tabLogin" class="tab-btn active w-1/2 py-3 text-center text-text-muted hover:text-text-primary focus:outline-none">Sign In</button>
+                    <button onclick="switchTab('signup')" id="tabSignup" class="tab-btn w-1/2 py-3 text-center text-text-muted hover:text-text-primary focus:outline-none">Sign Up</button>
+                </div>
+            </div>
+
+            <!-- Login Form -->
+            <form id="loginForm" class="space-y-5">
+                <div>
+                    <label class="block text-sm font-medium text-text-primary mb-1">Email</label>
+                    <input type="email" id="loginEmail" required class="w-full px-4 py-2 border border-border-color rounded-md focus:ring-2 focus:ring-clinical-blue focus:border-clinical-blue outline-none transition-colors">
+                </div>
+                <div>
+                    <label class="block text-sm font-medium text-text-primary mb-1">Password</label>
+                    <input type="password" id="loginPassword" required class="w-full px-4 py-2 border border-border-color rounded-md focus:ring-2 focus:ring-clinical-blue focus:border-clinical-blue outline-none transition-colors">
+                </div>
+                <div id="loginError" class="hidden text-red-600 text-sm font-medium"></div>
+                <button type="submit" class="w-full bg-clinical-blue hover:bg-blue-800 text-white py-3 rounded-md font-medium transition-colors flex justify-center items-center gap-2">
+                    Sign In
+                </button>
+            </form>
+
+            <!-- Signup Form -->
+            <form id="signupForm" class="space-y-5 hidden">
+                <div>
+                    <label class="block text-sm font-medium text-text-primary mb-1">Full Name</label>
+                    <input type="text" id="signupName" required class="w-full px-4 py-2 border border-border-color rounded-md focus:ring-2 focus:ring-clinical-blue focus:border-clinical-blue outline-none transition-colors">
+                </div>
+                <div>
+                    <label class="block text-sm font-medium text-text-primary mb-1">Email</label>
+                    <input type="email" id="signupEmail" required class="w-full px-4 py-2 border border-border-color rounded-md focus:ring-2 focus:ring-clinical-blue focus:border-clinical-blue outline-none transition-colors">
+                </div>
+                <div>
+                    <label class="block text-sm font-medium text-text-primary mb-1">Password</label>
+                    <input type="password" id="signupPassword" required minlength="6" class="w-full px-4 py-2 border border-border-color rounded-md focus:ring-2 focus:ring-clinical-blue focus:border-clinical-blue outline-none transition-colors">
+                </div>
+                <div>
+                    <label class="block text-sm font-medium text-text-primary mb-1">Confirm Password</label>
+                    <input type="password" id="signupConfirm" required class="w-full px-4 py-2 border border-border-color rounded-md focus:ring-2 focus:ring-clinical-blue focus:border-clinical-blue outline-none transition-colors">
+                </div>
+                <div id="signupError" class="hidden text-red-600 text-sm font-medium"></div>
+                <div id="signupSuccess" class="hidden text-clinical-green text-sm font-medium"></div>
+                <button type="submit" class="w-full bg-clinical-blue hover:bg-blue-800 text-white py-3 rounded-md font-medium transition-colors flex justify-center items-center gap-2">
+                    Create Account
+                </button>
+            </form>
+        </div>
+        
+        <p class="mt-8 text-sm text-text-muted italic">For authorized healthcare personnel only</p>
+    </div>
+
+    <script>
+        function switchTab(tab) {
+            document.getElementById('loginForm').classList.add('hidden');
+            document.getElementById('signupForm').classList.add('hidden');
+            document.getElementById('tabLogin').classList.remove('active');
+            document.getElementById('tabSignup').classList.remove('active');
+            
+            if (tab === 'login') {
+                document.getElementById('loginForm').classList.remove('hidden');
+                document.getElementById('tabLogin').classList.add('active');
+            } else {
+                document.getElementById('signupForm').classList.remove('hidden');
+                document.getElementById('tabSignup').classList.add('active');
+            }
+        }
+
+        document.getElementById('loginForm').addEventListener('submit', async (e) => {
+            e.preventDefault();
+            const email = document.getElementById('loginEmail').value;
+            const password = document.getElementById('loginPassword').value;
+            const errorDiv = document.getElementById('loginError');
+            
+            try {
+                const res = await fetch('/api/login', {
+                    method: 'POST',
+                    headers: {'Content-Type': 'application/json'},
+                    body: JSON.stringify({email, password})
+                });
+                const data = await res.json();
+                
+                if (data.success) {
+                    window.location.href = '/dashboard';
+                } else {
+                    errorDiv.textContent = data.error || 'Login failed';
+                    errorDiv.classList.remove('hidden');
+                }
+            } catch(err) {
+                errorDiv.textContent = 'Server error occurred.';
+                errorDiv.classList.remove('hidden');
+            }
+        });
+
+        document.getElementById('signupForm').addEventListener('submit', async (e) => {
+            e.preventDefault();
+            const name = document.getElementById('signupName').value;
+            const email = document.getElementById('signupEmail').value;
+            const password = document.getElementById('signupPassword').value;
+            const confirm = document.getElementById('signupConfirm').value;
+            
+            const errorDiv = document.getElementById('signupError');
+            const successDiv = document.getElementById('signupSuccess');
+            
+            errorDiv.classList.add('hidden');
+            successDiv.classList.add('hidden');
+            
+            if (password !== confirm) {
+                errorDiv.textContent = 'Passwords do not match';
+                errorDiv.classList.remove('hidden');
+                return;
+            }
+            
+            try {
+                const res = await fetch('/api/signup', {
+                    method: 'POST',
+                    headers: {'Content-Type': 'application/json'},
+                    body: JSON.stringify({name, email, password})
+                });
+                const data = await res.json();
+                
+                if (data.success) {
+                    successDiv.textContent = 'Account created successfully! Patient ID: ' + data.patient_id + '. Redirecting to login...';
+                    successDiv.classList.remove('hidden');
+                    setTimeout(() => {
+                        switchTab('login');
+                        document.getElementById('loginEmail').value = email;
+                    }, 2000);
+                } else {
+                    errorDiv.textContent = data.error || 'Signup failed';
+                    errorDiv.classList.remove('hidden');
+                }
+            } catch(err) {
+                errorDiv.textContent = 'Server error occurred.';
+                errorDiv.classList.remove('hidden');
+            }
+        });
+    </script>
+</body>
+</html>"""
+
+DASHBOARD_TEMPLATE = r"""<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>RetinaAI - Medical Diagnostic UI</title>
+    
+    <!-- Google Fonts: IBM Plex Sans -->
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+    
+    <!-- Material Symbols Outlined -->
+    <link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:wght,FILL@100..700,0..1&display=swap" rel="stylesheet" />
+
+    <!-- Tailwind CSS -->
+    <script src="https://cdn.tailwindcss.com?plugins=forms,container-queries"></script>
+    <script>
+        tailwind.config = {
+            theme: {
+                extend: {
+                    colors: {
+                        'clinical-blue': '#005596',
+                        'clinical-green': '#008a4b',
+                        'clinical-orange': '#f05a28',
+                        'bg-light': '#f8fafc',
+                        'card-bg': '#ffffff',
+                        'text-primary': '#1e293b',
+                        'text-muted': '#64748b',
+                        'border-color': '#e2e8f0'
+                    },
+                    fontFamily: {
+                        sans: ['IBM Plex Sans', 'sans-serif'],
+                    }
+                }
+            }
+        }
+    </script>
+    
+    <style>
+        body {
+            font-family: 'IBM Plex Sans', sans-serif;
+            background-color: #f8fafc;
+            color: #1e293b;
+        }
+        
+        .material-symbols-outlined {
+            font-variation-settings: 'FILL' 1, 'wght' 400, 'GRAD' 0, 'opsz' 24;
+            vertical-align: middle;
+        }
+        
+        .loader-overlay {
+            display: none;
+            position: fixed;
+            top: 0; left: 0; right: 0; bottom: 0;
+            background: rgba(255, 255, 255, 0.85);
+            backdrop-filter: blur(4px);
+            z-index: 50;
+            place-items: center;
+        }
+        
+        .loader-overlay.active {
+            display: grid !important;
+        }
+
+        .pulse-ring {
+            animation: pulse-eye 2s infinite ease-out;
+            transform-origin: center;
+        }
+        .scan-line {
+            animation: eye-scan 3s infinite linear;
+            transform-origin: center;
+        }
+        @keyframes pulse-eye {
+            0% { transform: scale(0.8); opacity: 0.8; }
+            100% { transform: scale(1.3); opacity: 0; }
+        }
+        @keyframes eye-scan {
+            0% { transform: translateY(-20px); opacity: 0; }
+            10% { opacity: 1; }
+            90% { opacity: 1; }
+            100% { transform: translateY(20px); opacity: 0; }
+        }
+        .retina-logo { transition: transform 0.3s; }
+        .retina-logo:hover { transform: scale(1.05); }
+
+        .anim-pulse-fast {
+            animation: pulse-fast 1s infinite alternate;
+        }
+        @keyframes pulse-fast {
+            from { transform: scale(0.95); opacity: 0.8; }
+            to { transform: scale(1.05); opacity: 1; }
+        }
+
+        .fade-in {
+            animation: fadeIn 0.4s ease-in-out;
+        }
+        
+        @keyframes fadeIn {
+            from { opacity: 0; transform: translateY(10px); }
+            to { opacity: 1; transform: translateY(0); }
+        }
+        
+        .view-btn {
+            padding: 0.5rem 1rem;
+            font-weight: 500;
+            border-radius: 0.375rem;
+            transition: all 0.2s;
+            color: #64748b;
+        }
+        .view-btn:hover {
+            color: #1e293b;
+            background-color: #f1f5f9;
+        }
+        .view-btn.active {
+            background-color: #005596;
+            color: white;
+        }
+        
+        /* Top Tabs Navbar */
+        .nav-tab {
+            border-bottom: 2px solid transparent;
+            padding: 1rem;
+            color: #64748b;
+            font-weight: 500;
+            cursor: pointer;
+            transition: all 0.2s;
+        }
+        .nav-tab:hover {
+            color: #1e293b;
+        }
+        .nav-tab.active {
+            border-bottom: 2px solid #005596;
+            color: #005596;
+        }
+
+        /* Stepper pulses */
+        .stepper-circle.active {
+            animation: pulse-step 1.5s infinite;
+        }
+        @keyframes pulse-step {
+            0% { box-shadow: 0 0 0 0 rgba(0, 85, 150, 0.4); }
+            70% { box-shadow: 0 0 0 10px rgba(0, 85, 150, 0); }
+            100% { box-shadow: 0 0 0 0 rgba(0, 85, 150, 0); }
+        }
+
+        .dropzone {
+            border: 2px dashed #cbd5e1;
+            transition: border-color 0.2s, background-color 0.2s;
+        }
+        .dropzone.dragover {
+            border-color: #005596;
+            background-color: #f0f7ff;
+        }
+        
+        @media print {
+            header button, #dropzone-container, #stepper-container, .nav-tab {
+                display: none !important;
+            }
+            body {
+                background: white;
+            }
+            .card-bg {
+                border: none;
+                box-shadow: none;
+            }
+        }
+    </style>
+</head>
+<body class="min-h-screen flex flex-col">
+
+    <!-- 1. STICKY HEADER -->
+    <header class="sticky top-0 z-40 bg-white border-b border-border-color shadow-sm px-4 sm:px-6 lg:px-8">
+        <div class="flex items-center justify-between max-w-7xl mx-auto py-3">
+            <div class="flex items-center gap-4">
+                <svg viewBox="0 0 100 100" xmlns="http://www.w3.org/2000/svg" class="retina-logo h-8 w-8 text-clinical-blue">
+                    <path d="M10,50 Q50,10 90,50 Q50,90 10,50 Z" fill="none" stroke="currentColor" stroke-width="4"/>
+                    <circle cx="50" cy="50" r="20" fill="none" stroke="currentColor" stroke-width="4"/>
+                    <circle cx="50" cy="50" r="8" fill="currentColor" class="pulse-ring"/>
+                    <circle cx="50" cy="50" r="8" fill="currentColor"/>
+                    <line x1="20" y1="50" x2="80" y2="50" stroke="#00ffff" stroke-width="2" class="scan-line" opacity="0.8"/>
+                </svg>
+                <h1 class="text-xl font-bold text-clinical-blue hidden sm:block">RetinaAI</h1>
+                <div class="w-px h-6 bg-border-color hidden sm:block"></div>
+                <div class="flex items-center gap-2">
+                    <div class="text-sm font-medium text-text-primary bg-slate-100 px-3 py-1 rounded-full">
+                        {{ patient_id }}
+                    </div>
+                    <span class="hidden sm:inline text-sm text-text-muted">{{ patient_name }}</span>
+                </div>
+            </div>
+            
+            <div class="flex items-center gap-3">
+                <div class="hidden sm:flex items-center gap-2 mr-4">
+                    <div class="w-2.5 h-2.5 rounded-full bg-clinical-green anim-pulse-fast"></div>
+                    <span class="text-sm font-medium text-text-muted">System Ready</span>
+                </div>
+                <button id="btnDownloadReport" onclick="generateReport()" class="hidden bg-clinical-blue hover:bg-blue-800 text-white px-4 py-2 rounded-md text-sm font-medium transition-colors flex items-center gap-2">
+                    <span class="material-symbols-outlined text-[20px]">download</span>
+                    Download Report
+                </button>
+                <button onclick="generateReport()" class="border border-border-color text-text-primary hover:bg-slate-50 px-4 py-2 rounded-md text-sm font-medium transition-colors flex items-center gap-2">
+                    <span class="material-symbols-outlined text-[20px]">print</span>
+                    Print
+                </button>
+                <a href="/logout" class="border border-red-200 text-red-600 hover:bg-red-50 px-3 py-2 rounded-md text-sm font-medium transition-colors flex items-center gap-1">
+                    <span class="material-symbols-outlined text-[18px]">logout</span>
+                    Logout
+                </a>
+            </div>
+        </div>
+
+        <div class="flex max-w-7xl mx-auto gap-4">
+            <div id="tabNewScreening" class="nav-tab active" onclick="switchNav('new-screening')">New Screening</div>
+            <div id="tabHistory" class="nav-tab" onclick="switchNav('history')">Previous Results</div>
+        </div>
     </header>
 
-    <div class="top-grid">
-      <div class="card">
-        <div class="card-title">&#x1f4f7; Fundus Image Acquisition</div>
-        <form id="analyzeForm">
-          <div class="dropzone" id="dropzone">
-            <div class="dropzone-icon">&#x1f441;&#xfe0f;</div>
-            <p>Drag &amp; drop fundus image here</p>
-            <p>or <span>browse files</span></p>
-            <input type="file" id="fileInput" name="image" accept="image/*" required>
-          </div>
-          <div class="preview-container" id="previewContainer">
-            <img id="previewImg" src="#" alt="Fundus Preview">
-          </div>
-          <button type="submit" class="btn-submit" id="submitBtn" disabled>
-            &#x1f52c; Run Dual-Stage Screening
-          </button>
-        </form>
-      </div>
+    <main class="flex-grow p-4 sm:p-6 lg:p-8 max-w-7xl mx-auto w-full space-y-6">
+        
+        <!-- NEW SCREENING VIEW -->
+        <div id="screening-view" class="fade-in space-y-6">
+            <!-- IMAGE ACQUISITION BAR -->
+            <section id="dropzone-container" class="bg-card-bg rounded-lg border border-border-color shadow-sm p-4 sm:p-6">
+                <form id="uploadForm" class="flex flex-col md:flex-row gap-6 items-center">
+                    <div id="dropzone" class="dropzone flex-grow w-full rounded-lg flex items-center p-6 cursor-pointer relative" onclick="document.getElementById('fileInput').click()">
+                        <input type="file" id="fileInput" name="file" accept=".jpg,.jpeg,.png" class="hidden">
+                        
+                        <div id="uploadPrompt" class="w-full flex flex-col items-center justify-center text-center space-y-2 pointer-events-none">
+                            <span class="material-symbols-outlined text-4xl text-text-muted">add_photo_alternate</span>
+                            <h3 class="font-medium text-text-primary text-lg">Upload Fundus Image</h3>
+                            <p class="text-sm text-text-muted">PNG or JPG, up to 10MB</p>
+                        </div>
+                        
+                        <div id="imagePreviewContainer" class="hidden w-full flex items-center justify-between pointer-events-none">
+                            <div class="flex items-center gap-4">
+                                <img id="imagePreview" src="" alt="Preview" class="h-16 w-16 object-cover rounded-md border border-border-color">
+                                <div class="text-left">
+                                    <p id="filenameDisplay" class="font-medium text-text-primary truncate max-w-xs"></p>
+                                    <p id="filesizeDisplay" class="text-sm text-text-muted"></p>
+                                </div>
+                            </div>
+                            <span class="material-symbols-outlined text-clinical-blue">check_circle</span>
+                        </div>
+                    </div>
+                    
+                    <div class="w-full md:w-auto flex-shrink-0">
+                        <button type="submit" id="btnSubmit" class="w-full md:w-auto bg-clinical-blue hover:bg-blue-800 disabled:opacity-50 disabled:cursor-not-allowed text-white px-8 py-3 rounded-md text-base font-medium transition-colors flex items-center justify-center gap-2" disabled>
+                            <span class="material-symbols-outlined">play_circle</span>
+                            Run Screening
+                        </button>
+                    </div>
+                </form>
+            </section>
 
-      <div class="card" id="resultsCard">
-        <div class="placeholder-state" id="placeholderState">
-          <div class="placeholder-icon">&#x1fa7a;</div>
-          <p>Upload a fundus image to run the two-stage<br>AI screening pipeline with Grad-CAM explainability.</p>
-        </div>
-        <div id="resultsContent" style="display: none;"></div>
-      </div>
-    </div>
+            <!-- PIPELINE PROGRESS STEPPER -->
+            <section id="stepper-container" class="hidden bg-card-bg rounded-lg border border-border-color shadow-sm p-6 fade-in">
+                <div class="flex items-center justify-between max-w-3xl mx-auto relative">
+                    <!-- Connectors -->
+                    <div class="absolute top-5 left-0 w-full flex justify-between z-0 px-[10%]">
+                        <div id="conn1" class="h-1 flex-grow bg-slate-200 transition-colors duration-500 mx-2"></div>
+                        <div id="conn2" class="h-1 flex-grow bg-slate-200 transition-colors duration-500 mx-2"></div>
+                    </div>
+                    
+                    <!-- Steps -->
+                    <div class="relative z-10 flex flex-col items-center gap-2 w-1/3">
+                        <div id="step1-circle" class="stepper-circle w-10 h-10 rounded-full flex items-center justify-center bg-slate-200 text-text-muted font-bold transition-all duration-300">
+                            <span class="step-num">1</span>
+                            <span class="material-symbols-outlined hidden step-icon text-white text-[20px]">check</span>
+                        </div>
+                        <div class="text-center">
+                            <p class="text-sm font-medium text-text-primary">Preprocessing</p>
+                            <p id="step1-sub" class="text-xs text-text-muted">(CLAHE)</p>
+                        </div>
+                    </div>
+                    
+                    <div class="relative z-10 flex flex-col items-center gap-2 w-1/3">
+                        <div id="step2-circle" class="stepper-circle w-10 h-10 rounded-full flex items-center justify-center bg-slate-200 text-text-muted font-bold transition-all duration-300">
+                            <span class="step-num">2</span>
+                            <span class="material-symbols-outlined hidden step-icon text-white text-[20px]">check</span>
+                        </div>
+                        <div class="text-center">
+                            <p class="text-sm font-medium text-text-primary">Anomaly Gate</p>
+                            <p id="step2-sub" class="text-xs text-text-muted">Pending</p>
+                        </div>
+                    </div>
+                    
+                    <div class="relative z-10 flex flex-col items-center gap-2 w-1/3">
+                        <div id="step3-circle" class="stepper-circle w-10 h-10 rounded-full flex items-center justify-center bg-slate-200 text-text-muted font-bold transition-all duration-300">
+                            <span class="step-num">3</span>
+                            <span class="material-symbols-outlined hidden step-icon text-white text-[20px]">check</span>
+                        </div>
+                        <div class="text-center">
+                            <p class="text-sm font-medium text-text-primary">Severity Grading</p>
+                            <p id="step3-sub" class="text-xs text-text-muted">Pending</p>
+                        </div>
+                    </div>
+                </div>
+            </section>
 
-    <div id="explainSection" style="display: none; margin-top: 1.5rem;" class="fade-in"></div>
-  </div>
+            <!-- Placeholder -->
+            <section id="results-placeholder" class="bg-card-bg rounded-lg border border-border-color shadow-sm p-16 flex flex-col items-center justify-center text-center">
+                <span class="material-symbols-outlined text-6xl text-slate-300 mb-4">visibility</span>
+                <h2 class="text-xl font-medium text-text-primary mb-2">No Image Loaded</h2>
+                <p class="text-text-muted max-w-md">Upload a fundus image and run the screening to view the diagnostic results here.</p>
+            </section>
 
-  <div class="loader-overlay" id="loaderOverlay">
-    <div class="loader-content">
-      <div class="loader-ring"></div>
-      <div class="loader-text">Analyzing fundus image&hellip;</div>
-      <div class="loader-stage" id="loaderStage">Stage 1: Anomaly Detection Gate</div>
-    </div>
-  </div>
+            <!-- Active Results Content -->
+            <div id="results-content" class="hidden space-y-6 fade-in">
+                
+                <!-- Alert Banner -->
+                <div id="alert-banner" class="bg-white rounded-lg shadow-sm border-l-4 p-4 flex items-start gap-4 relative overflow-hidden">
+                    <span id="alert-icon" class="material-symbols-outlined text-3xl">info</span>
+                    <div class="flex-grow">
+                        <h3 id="alert-title" class="text-lg font-bold text-text-primary mb-1">Result Title</h3>
+                        <p id="alert-desc" class="text-text-muted">Result description</p>
+                    </div>
+                    <div class="text-right relative z-10">
+                        <p class="text-xs text-text-muted uppercase tracking-wider font-semibold mb-1">Anomaly Score</p>
+                        <p id="alert-score" class="text-xl font-bold text-text-primary">0.00</p>
+                    </div>
+                    
+                    <!-- Decorative Pulsing Eye Badge -->
+                    <div id="alert-eye-badge" class="absolute right-32 top-1/2 -translate-y-1/2 opacity-20">
+                        <svg viewBox="0 0 100 100" class="h-16 w-16 anim-pulse-fast">
+                            <path d="M10,50 Q50,10 90,50 Q50,90 10,50 Z" fill="none" stroke="currentColor" stroke-width="4"/>
+                            <circle cx="50" cy="50" r="20" fill="none" stroke="currentColor" stroke-width="4"/>
+                            <circle cx="50" cy="50" r="8" fill="currentColor"/>
+                        </svg>
+                    </div>
+                </div>
 
-  <script>
-    const dropzone = document.getElementById('dropzone');
-    const fileInput = document.getElementById('fileInput');
-    const previewContainer = document.getElementById('previewContainer');
-    const previewImg = document.getElementById('previewImg');
-    const submitBtn = document.getElementById('submitBtn');
-    const analyzeForm = document.getElementById('analyzeForm');
-    const loaderOverlay = document.getElementById('loaderOverlay');
-    const loaderStage = document.getElementById('loaderStage');
-    const placeholderState = document.getElementById('placeholderState');
-    const resultsContent = document.getElementById('resultsContent');
-    const explainSection = document.getElementById('explainSection');
+                <!-- Dashboard Grid -->
+                <div class="grid grid-cols-1 lg:grid-cols-3 gap-6">
+                    
+                    <!-- Left Column: Metrics & Risk -->
+                    <div class="lg:col-span-1 space-y-6">
+                        
+                        <!-- 2x2 Metrics -->
+                        <div class="grid grid-cols-2 gap-4">
+                            <div class="bg-white p-4 rounded-lg border border-border-color shadow-sm">
+                                <p class="text-xs text-text-muted uppercase mb-1">Status</p>
+                                <p id="metric-status" class="text-lg font-bold uppercase"></p>
+                            </div>
+                            <div class="bg-white p-4 rounded-lg border border-border-color shadow-sm">
+                                <p class="text-xs text-text-muted uppercase mb-1">Severity</p>
+                                <p id="metric-severity" class="text-lg font-bold text-text-primary"></p>
+                            </div>
+                            <div class="bg-white p-4 rounded-lg border border-border-color shadow-sm">
+                                <p class="text-xs text-text-muted uppercase mb-1">AI Confidence</p>
+                                <p id="metric-confidence" class="text-2xl font-bold text-clinical-blue"></p>
+                            </div>
+                            <div class="bg-white p-4 rounded-lg border border-border-color shadow-sm">
+                                <p class="text-xs text-text-muted uppercase mb-1">Analysis Time</p>
+                                <p id="metric-time" class="text-lg font-bold text-text-primary"></p>
+                            </div>
+                        </div>
+                        
+                        <!-- Risk Distribution (Only if severity present) -->
+                        <div id="risk-card" class="bg-white rounded-lg border border-border-color shadow-sm overflow-hidden hidden">
+                            <div class="bg-slate-50 px-4 py-3 border-b border-border-color flex items-center gap-2">
+                                <span class="material-symbols-outlined text-text-muted text-[20px]">analytics</span>
+                                <h3 class="font-semibold text-text-primary text-sm">Risk Distribution</h3>
+                            </div>
+                            <div class="p-4 space-y-3" id="risk-bars-container">
+                                <!-- Populated dynamically -->
+                            </div>
+                        </div>
 
-    dropzone.addEventListener('click', () => fileInput.click());
-    dropzone.addEventListener('dragover', (e) => { e.preventDefault(); dropzone.classList.add('dragover'); });
-    dropzone.addEventListener('dragleave', () => dropzone.classList.remove('dragover'));
-    dropzone.addEventListener('drop', (e) => {
-      e.preventDefault(); dropzone.classList.remove('dragover');
-      if (e.dataTransfer.files.length) { fileInput.files = e.dataTransfer.files; handleFileSelect(); }
-    });
-    fileInput.addEventListener('change', handleFileSelect);
+                        <!-- Edge Compute Timing -->
+                        <div class="bg-white rounded-lg border border-border-color shadow-sm overflow-hidden">
+                            <div class="bg-slate-50 px-4 py-3 border-b border-border-color flex items-center gap-2">
+                                <span class="material-symbols-outlined text-text-muted text-[20px]">timer</span>
+                                <h3 class="font-semibold text-text-primary text-sm">Edge Compute Timing</h3>
+                            </div>
+                            <div class="p-4 space-y-2 text-sm" id="timing-container">
+                                <!-- Populated dynamically -->
+                            </div>
+                        </div>
+                    </div>
 
-    let uploadedImageB64 = null;
-    function handleFileSelect() {
-      const file = fileInput.files[0];
-      if (file) {
-        const reader = new FileReader();
-        reader.onload = (e) => {
-          previewImg.src = e.target.result;
-          uploadedImageB64 = e.target.result;
-          previewContainer.style.display = 'block';
-          submitBtn.disabled = false;
-        };
-        reader.readAsDataURL(file);
-      }
-    }
+                    <!-- Right Column: Visualizations -->
+                    <div id="visual-column" class="lg:col-span-2 hidden bg-white rounded-lg border border-border-color shadow-sm flex flex-col">
+                        
+                        <!-- Toolbar -->
+                        <div class="flex items-center justify-between p-4 border-b border-border-color">
+                            <div class="flex bg-slate-100 p-1 rounded-lg gap-1" id="view-tabs">
+                                <button class="view-btn active text-sm" onclick="switchView('side-by-side', this)">Side-by-Side</button>
+                                <button class="view-btn text-sm" onclick="switchView('original', this)">Original</button>
+                                <button class="view-btn text-sm" onclick="switchView('heatmap', this)">Heatmap</button>
+                            </div>
+                            <div class="bg-red-50 text-clinical-orange border border-red-100 px-3 py-1 rounded-full text-xs font-bold flex items-center gap-1">
+                                <span class="material-symbols-outlined text-[16px]">healing</span>
+                                <span id="badge-lesion-load"></span> Lesion Area
+                            </div>
+                        </div>
 
-    analyzeForm.addEventListener('submit', async (e) => {
-      e.preventDefault();
-      const file = fileInput.files[0];
-      if (!file) return;
-      const formData = new FormData();
-      formData.append('image', file);
-      submitBtn.disabled = true;
-      loaderOverlay.classList.add('active');
-      loaderStage.textContent = 'Stage 1: Anomaly Detection Gate';
-      setTimeout(() => { loaderStage.textContent = 'Stage 2: Severity Grading + Grad-CAM'; }, 1200);
-      try {
-        const response = await fetch('/api/analyze', { method: 'POST', body: formData });
-        const res = await response.json();
-        renderResults(res);
-      } catch (err) {
-        alert('Analysis failed: ' + err.message);
-      } finally {
-        submitBtn.disabled = false;
-        loaderOverlay.classList.remove('active');
-      }
-    });
+                        <!-- Image Container -->
+                        <div class="p-4 bg-slate-50 flex-grow flex items-center justify-center min-h-[400px]">
+                            
+                            <!-- Side by side view -->
+                            <div id="view-side-by-side" class="w-full grid grid-cols-1 md:grid-cols-2 gap-4">
+                                <div class="relative w-full aspect-square rounded-lg overflow-hidden border border-border-color shadow-inner bg-black">
+                                    <div id="img-orig-sbs" class="absolute inset-0 bg-contain bg-center bg-no-repeat"></div>
+                                    <div class="absolute top-2 left-2 bg-black/60 text-white text-xs px-2 py-1 rounded backdrop-blur-sm">Original</div>
+                                </div>
+                                <div class="relative w-full aspect-square rounded-lg overflow-hidden border border-border-color shadow-inner bg-black">
+                                    <div id="img-heat-sbs" class="absolute inset-0 bg-contain bg-center bg-no-repeat"></div>
+                                    <div class="absolute top-2 left-2 bg-black/60 text-white text-xs px-2 py-1 rounded backdrop-blur-sm">Grad-CAM Heatmap</div>
+                                </div>
+                            </div>
 
-    const gradeColors = ['#10b981', '#3b82f6', '#f59e0b', '#f97316', '#f43f5e'];
-    const gradeDescriptions = {
-      0: { short: 'No DR', detail: 'No visible signs of diabetic retinopathy were detected. The retinal vasculature, macula, and optic disc appear within normal limits. No microaneurysms, hemorrhages, or exudates are observed in the regions highlighted by the model.' },
-      1: { short: 'Mild NPDR', detail: 'Early signs of non-proliferative diabetic retinopathy detected. The Grad-CAM activation map highlights regions consistent with the presence of <strong>microaneurysms</strong> &mdash; small round dots indicating weakened capillary walls. These are typically the earliest clinical signs of DR.' },
-      2: { short: 'Moderate NPDR', detail: 'The model identifies features consistent with moderate non-proliferative diabetic retinopathy. Grad-CAM highlights regions suggesting <strong>dot-blot hemorrhages</strong>, <strong>hard exudates</strong> (lipid deposits), and possible <strong>cotton-wool spots</strong> (retinal nerve fiber layer infarcts). The activated regions indicate vascular leakage patterns.' },
-      3: { short: 'Severe NPDR', detail: 'The activation map reveals widespread retinal involvement consistent with severe NPDR. The model detects features matching the <strong>4-2-1 rule</strong>: extensive hemorrhages, venous beading, and intraretinal microvascular abnormalities (IRMA). <strong>Urgent ophthalmology referral recommended</strong>.' },
-      4: { short: 'Proliferative DR', detail: 'The Grad-CAM map highlights extensive regions consistent with proliferative diabetic retinopathy. Activated areas suggest <strong>neovascularization</strong> (new abnormal blood vessel growth), possible <strong>vitreous hemorrhage</strong>, and <strong>fibrous proliferation</strong>. <strong>Immediate specialist intervention required to prevent vision loss</strong>.' }
-    };
+                            <!-- Single Views -->
+                            <div id="view-original" class="hidden w-full max-w-2xl aspect-square relative rounded-lg overflow-hidden border border-border-color shadow-inner bg-black">
+                                <div id="img-orig-single" class="absolute inset-0 bg-contain bg-center bg-no-repeat"></div>
+                                <div class="absolute top-2 left-2 bg-black/60 text-white text-xs px-2 py-1 rounded backdrop-blur-sm">Original</div>
+                            </div>
 
-    function getLesionDescription(lesionLoad, grade) {
-      const pct = (lesionLoad * 100).toFixed(1);
-      if (grade === 0) {
-        if (lesionLoad < 0.01) return `Lesion load is <strong>${pct}%</strong> of the retinal area &mdash; minimal activation consistent with a healthy retina. No concerning focal regions detected.`;
-        return `Lesion load is <strong>${pct}%</strong>. Minor activation detected but below clinical significance threshold (1%). May reflect image artifacts or normal anatomical variation.`;
-      }
-      if (lesionLoad < 0.03) return `Lesion load is <strong>${pct}%</strong> of the retinal area. Focal activation in specific regions warrants attention despite low overall coverage.`;
-      if (lesionLoad < 0.08) return `Lesion load covers <strong>${pct}%</strong> of the retinal area, showing moderate pathological involvement. Activated regions correlate with vascular abnormalities.`;
-      return `Lesion load is <strong>${pct}%</strong> of the retinal area &mdash; significant pathological involvement detected. Widespread activation indicates extensive retinal damage requiring clinical follow-up.`;
-    }
+                            <div id="view-heatmap" class="hidden w-full max-w-2xl aspect-square relative rounded-lg overflow-hidden border border-border-color shadow-inner bg-black">
+                                <div id="img-heat-single" class="absolute inset-0 bg-contain bg-center bg-no-repeat"></div>
+                                <div class="absolute top-2 left-2 bg-black/60 text-white text-xs px-2 py-1 rounded backdrop-blur-sm">Grad-CAM Heatmap</div>
+                            </div>
+                        </div>
 
-    function renderResults(res) {
-      placeholderState.style.display = 'none';
-      resultsContent.style.display = 'block';
-      resultsContent.className = 'fade-in';
+                        <!-- Clinical Findings -->
+                        <div class="p-4 border-t border-border-color bg-slate-50">
+                            <div class="flex gap-3 text-sm">
+                                <span class="material-symbols-outlined text-clinical-blue mt-0.5">info</span>
+                                <div>
+                                    <p class="font-medium text-text-primary mb-1">Clinical Findings</p>
+                                    <p class="text-text-muted mb-2"><span id="finding-grade" class="font-semibold"></span>. <span id="finding-lesion"></span></p>
+                                    <p class="italic text-xs text-slate-400">Disclaimer: This is an AI-assisted screening tool. Results should be verified by a qualified ophthalmologist.</p>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
 
-      const isNormal = res.gate === 'normal_gate';
-      const isReferral = res.action && res.action.startsWith('Refer');
-      const hasSeverity = !!res.severity;
-      const grade = hasSeverity ? res.severity.grade : -1;
-
-      let bannerClass = isNormal ? 'banner-normal' : (isReferral ? 'banner-referral' : 'banner-proceed');
-
-      let html = `
-        <div class="action-banner ${bannerClass}">
-          <span>${res.action}</span>
-          <span style="font-size:0.82rem;opacity:0.8;">Score: ${res.anomaly_score.toFixed(4)}</span>
-        </div>
-        <div class="metrics-grid">
-          <div class="metric-card">
-            <div class="metric-label">Stage 1 Gate</div>
-            <div class="metric-value">${isNormal ? '&#x2705; Normal' : '&#x26a0;&#xfe0f; Flagged'}</div>
-          </div>
-          <div class="metric-card">
-            <div class="metric-label">Severity Grade</div>
-            <div class="metric-value">
-              ${hasSeverity ? '<span class="grade-badge grade-' + grade + '">' + grade + ' &mdash; ' + res.severity.grade_name + '</span>' : 'N/A'}
+                </div>
             </div>
-          </div>
-          <div class="metric-card">
-            <div class="metric-label">Confidence</div>
-            <div class="metric-value">${hasSeverity ? res.severity.confidence_pct + '%' : '100%'}</div>
-          </div>
-          <div class="metric-card">
-            <div class="metric-label">Total Latency</div>
-            <div class="metric-value">${res.timings.total_ms} ms</div>
-          </div>
         </div>
-      `;
 
-      if (hasSeverity) {
-        html += `<div class="chart-box"><div class="chart-title">Bayesian Posterior Probability Distribution (30 Samples)</div>`;
-        let idx = 0;
-        for (const [name, p] of Object.entries(res.severity.probabilities)) {
-          const pct = (p * 100).toFixed(1);
-          html += `
-            <div class="bar-row">
-              <div class="bar-header"><span>${name}</span><span>${pct}%</span></div>
-              <div class="bar-track"><div class="bar-fill" style="width:${pct}%;background:${gradeColors[idx++]};"></div></div>
-            </div>`;
+        <!-- HISTORY TIMELINE VIEW -->
+        <div id="history-view" class="hidden fade-in space-y-6">
+            <!-- Summary Metrics Row -->
+            <div class="grid grid-cols-2 lg:grid-cols-4 gap-4">
+                <div class="bg-white p-4 rounded-lg border border-border-color shadow-sm">
+                    <p class="text-xs text-text-muted uppercase mb-1">Total Screenings</p>
+                    <p id="hist-total" class="text-2xl font-bold text-text-primary">0</p>
+                </div>
+                <div class="bg-white p-4 rounded-lg border border-border-color shadow-sm">
+                    <p class="text-xs text-text-muted uppercase mb-1">Healthy Screenings</p>
+                    <p id="hist-healthy" class="text-2xl font-bold text-clinical-green">0</p>
+                </div>
+                <div class="bg-white p-4 rounded-lg border border-border-color shadow-sm">
+                    <p class="text-xs text-text-muted uppercase mb-1">Flagged Screenings</p>
+                    <p id="hist-flagged" class="text-2xl font-bold text-clinical-orange">0</p>
+                </div>
+                <div class="bg-white p-4 rounded-lg border border-border-color shadow-sm">
+                    <p class="text-xs text-text-muted uppercase mb-1">Latest Screening</p>
+                    <p id="hist-latest-date" class="text-xl font-bold text-text-primary">-</p>
+                </div>
+            </div>
+
+            <div class="bg-white rounded-lg border border-border-color shadow-sm">
+                <div class="bg-slate-50 px-4 py-3 border-b border-border-color flex items-center justify-between">
+                    <h3 class="font-semibold text-text-primary">Diagnostic Timeline</h3>
+                    <button onclick="fetchHistory()" class="text-clinical-blue hover:text-blue-800 text-sm font-medium flex items-center gap-1">
+                        <span class="material-symbols-outlined text-[18px]">refresh</span> Refresh
+                    </button>
+                </div>
+                
+                <div id="history-feed" class="p-6 space-y-6">
+                    <div class="text-center text-text-muted py-8">Loading timeline...</div>
+                </div>
+            </div>
+        </div>
+    </main>
+
+    <!-- LOADING OVERLAY -->
+    <div id="loader" class="loader-overlay">
+        <div class="bg-white p-8 rounded-xl shadow-xl flex flex-col items-center max-w-sm w-full mx-4 border border-border-color text-center space-y-4">
+            
+            <svg viewBox="0 0 100 100" xmlns="http://www.w3.org/2000/svg" class="h-16 w-16 text-clinical-blue mb-2">
+                <path d="M10,50 Q50,10 90,50 Q50,90 10,50 Z" fill="none" stroke="currentColor" stroke-width="4"/>
+                <circle cx="50" cy="50" r="20" fill="none" stroke="currentColor" stroke-width="4"/>
+                <circle cx="50" cy="50" r="8" fill="currentColor" class="pulse-ring"/>
+                <circle cx="50" cy="50" r="8" fill="currentColor"/>
+                <line x1="20" y1="50" x2="80" y2="50" stroke="#00ffff" stroke-width="2" class="scan-line" opacity="0.8"/>
+            </svg>
+            
+            <h3 class="text-lg font-bold text-clinical-blue">Executing Edge Inference...</h3>
+            <p id="loader-text" class="text-sm font-medium text-text-muted transition-opacity">Initializing pipeline...</p>
+            <div class="w-full bg-slate-100 h-2 rounded-full mt-2 overflow-hidden">
+                <div class="bg-clinical-blue h-full w-1/3 animate-pulse rounded-full"></div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Modals etc... can be expanded if needed -->
+
+    <!-- Scripts -->
+    <script>
+        const PATIENT_ID = '{{ patient_id }}';
+        const PATIENT_NAME = '{{ patient_name }}';
+        
+        let uploadedImageB64 = null;
+        let lastResults = null;
+        let historyData = [];
+
+        function switchNav(tab) {
+            document.querySelectorAll('.nav-tab').forEach(el => el.classList.remove('active'));
+            document.getElementById('screening-view').classList.add('hidden');
+            document.getElementById('history-view').classList.add('hidden');
+            
+            if (tab === 'new-screening') {
+                document.getElementById('tabNewScreening').classList.add('active');
+                document.getElementById('screening-view').classList.remove('hidden');
+            } else if (tab === 'history') {
+                document.getElementById('tabHistory').classList.add('active');
+                document.getElementById('history-view').classList.remove('hidden');
+                fetchHistory();
+            }
         }
-        html += `</div>`;
-      }
 
-      html += `
-        <div style="margin-top:1rem;">
-          <div class="chart-title">Edge Pipeline Performance</div>
-          <table class="timing-table">
-            <tr><td>Preprocessing (CLAHE + Crop)</td><td>${res.timings.preprocess_ms} ms</td></tr>
-            <tr><td>Stage 1 GANomaly Gate</td><td>${res.timings.stage1_ms} ms</td></tr>
-            ${res.timings.stage2_ms ? '<tr><td>Stage 2 VBLL + Grad-CAM</td><td>' + res.timings.stage2_ms + ' ms</td></tr>' : ''}
-            <tr><td>Total Processing</td><td>${res.timings.total_ms} ms</td></tr>
-          </table>
-        </div>`;
+        async function fetchHistory() {
+            try {
+                const res = await fetch('/api/history');
+                const data = await res.json();
+                if (data.success) {
+                    historyData = data.history;
+                    renderHistory();
+                }
+            } catch (err) {
+                console.error(err);
+            }
+        }
 
-      resultsContent.innerHTML = html;
+        function renderHistory() {
+            const feed = document.getElementById('history-feed');
+            
+            if (!historyData || historyData.length === 0) {
+                feed.innerHTML = '<div class="text-center text-text-muted py-8">No previous screenings found.</div>';
+                document.getElementById('hist-total').textContent = '0';
+                document.getElementById('hist-healthy').textContent = '0';
+                document.getElementById('hist-flagged').textContent = '0';
+                document.getElementById('hist-latest-date').textContent = '-';
+                return;
+            }
 
-      // Explainability section
-      if (hasSeverity && res.cam_heatmap) {
-        const lesionLoad = res.cam_lesion_load || 0;
-        const lesionPct = (lesionLoad * 100).toFixed(1);
-        const lesionColor = lesionLoad < 0.01 ? 'var(--accent-emerald)' : (lesionLoad < 0.08 ? 'var(--accent-amber)' : 'var(--accent-rose)');
+            let normalCount = 0;
+            let flaggedCount = 0;
+            let html = '';
 
-        explainSection.style.display = 'block';
-        explainSection.className = 'card fade-in';
-        explainSection.innerHTML = `
-          <div class="card-title">&#x1f9e0; Explainable AI &mdash; Grad-CAM Activation Map</div>
+            historyData.forEach((item, index) => {
+                const isNormal = item.gate === 'normal_gate';
+                if(isNormal) normalCount++; else flaggedCount++;
+                
+                const dateObj = new Date(item.timestamp);
+                const dateStr = dateObj.toLocaleDateString() + ' ' + dateObj.toLocaleTimeString();
 
-          <div class="explain-grid">
-            <div class="explain-card">
-              <div class="explain-card-label">&#x1f441;&#xfe0f; Original Fundus Image</div>
-              <img src="${uploadedImageB64}" alt="Original fundus">
-            </div>
-            <div class="explain-card">
-              <div class="explain-card-label">&#x1f525; Grad-CAM Heatmap Overlay</div>
-              <img src="data:image/png;base64,${res.cam_heatmap}" alt="Grad-CAM heatmap">
-            </div>
-          </div>
+                let imgsHtml = '';
+                if(item.original_b64) {
+                    const imgSrc = item.original_b64.startsWith('data:') ? item.original_b64 : 'data:image/jpeg;base64,' + item.original_b64;
+                    const heatSrc = item.heatmap_b64 ? 'data:image/png;base64,' + item.heatmap_b64 : '';
+                    imgsHtml = `
+                    <div class="flex gap-4 mt-4">
+                        <img src="${imgSrc}" class="h-24 w-24 object-cover rounded border border-border-color bg-black">
+                        ${heatSrc ? `<img src="${heatSrc}" class="h-24 w-24 object-cover rounded border border-border-color bg-black">` : ''}
+                    </div>
+                    `;
+                }
 
-          <div class="lesion-meter" style="margin-top:1.25rem;">
-            <div class="lesion-meter-label">
-              <span>Lesion Activation Load</span>
-              <span style="font-weight:700;color:${lesionColor};">${lesionPct}%</span>
-            </div>
-            <div class="lesion-meter-track">
-              <div class="lesion-meter-fill" style="width:${Math.min(lesionPct, 100)}%;background:linear-gradient(90deg, var(--accent-emerald), ${lesionColor});"></div>
-            </div>
-            <div class="lesion-meter-markers">
-              <div class="lesion-marker" style="left:1%;">1% (low)</div>
-              <div class="lesion-marker" style="left:8%;">8% (high)</div>
-              <div class="lesion-marker" style="left:20%;">20%</div>
-            </div>
-          </div>
+                html += `
+                <div class="border border-border-color rounded-lg overflow-hidden">
+                    <div class="bg-slate-50 px-4 py-3 border-b border-border-color flex justify-between items-center">
+                        <div class="flex items-center gap-3">
+                            <div class="bg-white border border-border-color px-2 py-1 rounded text-xs font-semibold text-text-muted">
+                                ${dateStr}
+                            </div>
+                            <span class="px-2 py-1 rounded-full text-xs font-bold ${isNormal ? 'bg-green-100 text-clinical-green' : 'bg-orange-100 text-clinical-orange'}">
+                                ${isNormal ? 'Normal — No Referral' : 'Flagged — ' + (item.severity_name || 'Refer')}
+                            </span>
+                        </div>
+                    </div>
+                    <div class="p-4">
+                        <div class="grid grid-cols-2 md:grid-cols-4 gap-4 mb-4">
+                            <div>
+                                <p class="text-xs text-text-muted">Anomaly Score</p>
+                                <p class="font-medium">${item.anomaly_score.toFixed(4)}</p>
+                            </div>
+                            <div>
+                                <p class="text-xs text-text-muted">Severity Grade</p>
+                                <p class="font-medium">${item.severity_name || 'N/A'}</p>
+                            </div>
+                            <div>
+                                <p class="text-xs text-text-muted">Confidence</p>
+                                <p class="font-medium">${item.confidence_pct ? item.confidence_pct.toFixed(1)+'%' : 'N/A'}</p>
+                            </div>
+                            <div>
+                                <p class="text-xs text-text-muted">Lesion Area</p>
+                                <p class="font-medium">${item.lesion_load ? (item.lesion_load*100).toFixed(1)+'%' : 'N/A'}</p>
+                            </div>
+                        </div>
+                        
+                        ${imgsHtml}
+                        
+                        <div class="mt-4 flex gap-3">
+                            <button onclick='generateReportFromHistory(${index})' class="text-sm text-clinical-blue hover:underline flex items-center gap-1">
+                                <span class="material-symbols-outlined text-[16px]">download</span> Download Report
+                            </button>
+                        </div>
+                    </div>
+                </div>
+                `;
+            });
 
-          <div class="clinical-box">
-            <h3>&#x1f4cb; Clinical Interpretation</h3>
-            <p><strong>Predicted: Grade ${grade} &mdash; ${gradeDescriptions[grade].short}</strong></p>
-            <p style="margin-top:0.5rem;">${gradeDescriptions[grade].detail}</p>
-            <p style="margin-top:0.5rem;">${getLesionDescription(lesionLoad, grade)}</p>
-            <p style="margin-top:0.7rem;font-size:0.78rem;color:var(--text-muted);">&#x26a0;&#xfe0f; This AI screening is intended as a clinical decision support tool. All flagged cases should be reviewed by a qualified ophthalmologist. The Grad-CAM visualization shows which retinal regions most influenced the model's prediction.</p>
-          </div>
-        `;
-      } else {
-        explainSection.style.display = 'none';
-      }
-    }
-  </script>
+            feed.innerHTML = html;
+            
+            document.getElementById('hist-total').textContent = historyData.length;
+            document.getElementById('hist-healthy').textContent = normalCount;
+            document.getElementById('hist-flagged').textContent = flaggedCount;
+            
+            const latest = new Date(historyData[0].timestamp);
+            document.getElementById('hist-latest-date').textContent = latest.toLocaleDateString();
+        }
+
+        function generateReportFromHistory(index) {
+            const item = historyData[index];
+            const r = item.full_json;
+            const isNormal = r.gate === 'normal_gate';
+            const dateStr = new Date(item.timestamp).toLocaleString();
+            
+            const origB64 = item.original_b64.startsWith('data:') ? item.original_b64 : 'data:image/jpeg;base64,' + item.original_b64;
+
+            let heatmapSection = '';
+            if(r.cam_heatmap) {
+                heatmapSection = `
+                <div class="section" style="page-break-inside: avoid;">
+                    <h2>Visual Analysis (Grad-CAM)</h2>
+                    <div style="display: flex; gap: 20px;">
+                        <div style="flex: 1;">
+                            <h4>Original Image</h4>
+                            <img src="${origB64}" style="width: 100%; border: 1px solid #ccc;">
+                        </div>
+                        <div style="flex: 1;">
+                            <h4>Heatmap Analysis</h4>
+                            <img src="data:image/png;base64,${r.cam_heatmap}" style="width: 100%; border: 1px solid #ccc;">
+                        </div>
+                    </div>
+                    <p style="margin-top: 10px;"><strong>Lesion Load:</strong> ${(r.cam_lesion_load*100).toFixed(1)}%</p>
+                </div>`;
+            }
+            
+            let severitySection = '';
+            if(r.severity) {
+                let probsHtml = '';
+                for(let [k,v] of Object.entries(r.severity.probabilities)) {
+                    probsHtml += `<li>${k}: ${(v*100).toFixed(2)}%</li>`;
+                }
+                
+                severitySection = `
+                <div class="section">
+                    <h2>Severity Assessment</h2>
+                    <p><strong>Predicted Grade:</strong> ${r.severity.grade_name} (Grade ${r.severity.grade})</p>
+                    <p><strong>AI Confidence:</strong> ${r.severity.confidence_pct.toFixed(2)}%</p>
+                    <h4>Risk Distribution:</h4>
+                    <ul>${probsHtml}</ul>
+                </div>`;
+            }
+
+            const htmlContent = `
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Diagnostic Report - ${PATIENT_NAME} (${PATIENT_ID})</title>
+    <link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans:wght@400;600;700&display=swap" rel="stylesheet">
+    <style>
+        body { font-family: 'IBM Plex Sans', sans-serif; color: #1e293b; max-width: 800px; margin: 0 auto; padding: 40px; background: #fff; line-height: 1.6; }
+        .header { border-bottom: 2px solid #005596; padding-bottom: 20px; margin-bottom: 30px; }
+        .header h1 { color: #005596; margin: 0 0 10px 0; }
+        .meta { display: flex; justify-content: space-between; color: #64748b; font-size: 0.9em; }
+        .section { background: #f8fafc; border: 1px solid #e2e8f0; padding: 20px; border-radius: 8px; margin-bottom: 20px; }
+        h2 { color: #005596; margin-top: 0; font-size: 1.2em; border-bottom: 1px solid #cbd5e1; padding-bottom: 8px; }
+        .alert { padding: 15px; border-left: 5px solid ${isNormal ? '#008a4b' : '#f05a28'}; background: #fff; margin-bottom: 20px; border-radius: 4px; box-shadow: 0 1px 3px rgba(0,0,0,0.1); }
+        .footer { margin-top: 50px; font-size: 0.8em; color: #94a3b8; text-align: center; border-top: 1px solid #e2e8f0; padding-top: 20px; font-style: italic; }
+    </style>
+</head>
+<body>
+    <div class="header">
+        <h1>RetinaAI Diagnostic Report</h1>
+        <div class="meta">
+            <span><strong>Patient:</strong> ${PATIENT_NAME} (${PATIENT_ID})</span>
+            <span><strong>Date:</strong> ${dateStr}</span>
+        </div>
+    </div>
+    
+    <div class="alert">
+        <h3 style="margin:0 0 10px 0; color: ${isNormal ? '#008a4b' : '#f05a28'};">
+            ${isNormal ? 'Screening Complete: No Anomalies Detected' : 'Referral Recommended: Anomalies Detected'}
+        </h3>
+        <p style="margin:0;"><strong>Action:</strong> ${r.action}</p>
+        <p style="margin:5px 0 0 0;"><strong>Anomaly Score:</strong> ${r.anomaly_score.toFixed(4)}</p>
+    </div>
+    
+    ${severitySection}
+    ${heatmapSection}
+    
+    <div class="section">
+        <h2>System Timings</h2>
+        <ul style="margin:0; padding-left: 20px;">
+            <li>Preprocessing: ${r.timings.preprocess_ms} ms</li>
+            <li>Stage 1 (Gate): ${r.timings.stage1_ms} ms</li>
+            ${r.timings.stage2_ms ? `<li>Stage 2 (Classify): ${r.timings.stage2_ms} ms</li>` : ''}
+            <li><strong>Total Time: ${r.timings.total_ms} ms</strong></li>
+        </ul>
+    </div>
+    
+    <div class="footer">
+        Disclaimer: This report is generated by an AI-assisted screening tool. The results, interpretations, and visualizations are for informational purposes only and must be verified by a qualified ophthalmologist. This is not a final medical diagnosis.
+    </div>
+</body>
+</html>`;
+
+            const blob = new Blob([htmlContent], { type: 'text/html' });
+            const url = URL.createObjectURL(blob);
+            
+            const timestamp = new Date().toISOString().replace(/[:T]/g, '-').split('.')[0];
+            const filename = `RetinaAI_Report_${timestamp}.html`;
+            
+            const a = document.createElement('a');
+            a.href = url;
+            a.download = filename;
+            document.body.appendChild(a);
+            a.click();
+            document.body.removeChild(a);
+            URL.revokeObjectURL(url);
+        }
+
+        // --- Rest of original scripts for file drop and analysis ---
+        const fileInput = document.getElementById('fileInput');
+        const dropzone = document.getElementById('dropzone');
+        
+        // Drag and drop setup
+        ['dragenter', 'dragover', 'dragleave', 'drop'].forEach(eventName => {
+            if(dropzone) dropzone.addEventListener(eventName, preventDefaults, false);
+        });
+        function preventDefaults(e) {
+            e.preventDefault();
+            e.stopPropagation();
+        }
+        
+        ['dragenter', 'dragover'].forEach(eventName => {
+            if(dropzone) dropzone.addEventListener(eventName, () => dropzone.classList.add('dragover'), false);
+        });
+        
+        ['dragleave', 'drop'].forEach(eventName => {
+            if(dropzone) dropzone.addEventListener(eventName, () => dropzone.classList.remove('dragover'), false);
+        });
+        
+        if(dropzone) dropzone.addEventListener('drop', (e) => {
+            let dt = e.dataTransfer;
+            let files = dt.files;
+            if(files.length > 0) {
+                fileInput.files = files;
+                handleFileSelect();
+            }
+        });
+        
+        if(fileInput) fileInput.addEventListener('change', handleFileSelect);
+        
+        function handleFileSelect() {
+            if(fileInput.files && fileInput.files[0]) {
+                const file = fileInput.files[0];
+                const reader = new FileReader();
+                
+                reader.onload = function(e) {
+                    uploadedImageB64 = e.target.result;
+                    document.getElementById('uploadPrompt').classList.add('hidden');
+                    document.getElementById('imagePreviewContainer').classList.remove('hidden');
+                    document.getElementById('imagePreview').src = uploadedImageB64;
+                    document.getElementById('filenameDisplay').textContent = file.name;
+                    document.getElementById('filesizeDisplay').textContent = (file.size / (1024*1024)).toFixed(2) + ' MB';
+                    document.getElementById('btnSubmit').disabled = false;
+                }
+                reader.readAsDataURL(file);
+            }
+        }
+
+        if(document.getElementById('uploadForm')) {
+            document.getElementById('uploadForm').addEventListener('submit', async (e) => {
+                e.preventDefault();
+                if(!fileInput.files[0]) return;
+                
+                const loader = document.getElementById('loader');
+                const loaderText = document.getElementById('loader-text');
+                const stepperContainer = document.getElementById('stepper-container');
+                const resultsPlaceholder = document.getElementById('results-placeholder');
+                const resultsContent = document.getElementById('results-content');
+                
+                loader.classList.add('active');
+                resultsPlaceholder.classList.add('hidden');
+                resultsContent.classList.add('hidden');
+                stepperContainer.classList.remove('hidden');
+                document.getElementById('btnDownloadReport').classList.add('hidden');
+                
+                resetStepper();
+                
+                loaderText.textContent = "Stage 1: Anomaly Gate Evaluation";
+                setStepperState(1, 'active');
+                
+                const formData = new FormData();
+                formData.append('file', fileInput.files[0]);
+                
+                try {
+                    setTimeout(() => {
+                        loaderText.textContent = "Stage 2: Severity Classification & Grad-CAM";
+                        setStepperState(1, 'completed');
+                        setStepperState(2, 'active');
+                    }, 1000);
+
+                    const response = await fetch('/api/analyze', {
+                        method: 'POST',
+                        body: formData
+                    });
+                    
+                    if(!response.ok) throw new Error("API request failed");
+                    const data = await response.json();
+                    lastResults = data;
+                    
+                    setTimeout(() => {
+                        loader.classList.remove('active');
+                        renderResults(data);
+                    }, 1500);
+                    
+                } catch(error) {
+                    console.error("Error analyzing image:", error);
+                    alert("An error occurred during analysis.");
+                    loader.classList.remove('active');
+                }
+            });
+        }
+
+        function resetStepper() {
+            const steps = [1,2,3];
+            steps.forEach(s => {
+                const circle = document.getElementById(`step${s}-circle`);
+                circle.className = "stepper-circle w-10 h-10 rounded-full flex items-center justify-center bg-slate-200 text-text-muted font-bold transition-all duration-300";
+                circle.querySelector('.step-num').classList.remove('hidden');
+                circle.querySelector('.step-icon').classList.add('hidden');
+                circle.querySelector('.step-icon').textContent = 'check';
+                if(s==2) document.getElementById('step2-sub').textContent = 'Pending';
+                if(s==3) document.getElementById('step3-sub').textContent = 'Pending';
+            });
+            document.getElementById('conn1').className = "h-1 flex-grow bg-slate-200 transition-colors duration-500 mx-2";
+            document.getElementById('conn2').className = "h-1 flex-grow bg-slate-200 transition-colors duration-500 mx-2";
+        }
+        
+        function setStepperState(stepNum, state, extra=null) {
+            const circle = document.getElementById(`step${stepNum}-circle`);
+            const num = circle.querySelector('.step-num');
+            const icon = circle.querySelector('.step-icon');
+            
+            circle.classList.remove('bg-slate-200', 'bg-clinical-blue', 'bg-clinical-green', 'bg-clinical-orange', 'text-text-muted', 'text-white', 'active');
+            
+            if(state === 'active') {
+                circle.classList.add('bg-clinical-blue', 'text-white', 'active');
+                num.classList.remove('hidden');
+                icon.classList.add('hidden');
+            } else if (state === 'completed') {
+                circle.classList.add('bg-clinical-green', 'text-white');
+                num.classList.add('hidden');
+                icon.classList.remove('hidden');
+                icon.textContent = 'check';
+                
+                if(stepNum < 3) {
+                    document.getElementById(`conn${stepNum}`).classList.replace('bg-slate-200', 'bg-clinical-green');
+                }
+            } else if (state === 'flagged') {
+                circle.classList.add('bg-clinical-orange', 'text-white');
+                num.classList.add('hidden');
+                icon.classList.remove('hidden');
+                icon.textContent = 'priority_high';
+                if(stepNum < 3) {
+                    document.getElementById(`conn${stepNum}`).classList.replace('bg-slate-200', 'bg-clinical-orange');
+                }
+            }
+        }
+
+        function renderResults(res) {
+            const content = document.getElementById('results-content');
+            content.classList.remove('hidden');
+            document.getElementById('btnDownloadReport').classList.remove('hidden');
+            
+            const isNormal = res.gate === 'normal_gate';
+            
+            setStepperState(1, 'completed');
+            if(isNormal) {
+                setStepperState(2, 'completed');
+                document.getElementById('step2-sub').textContent = 'Passed';
+            } else {
+                setStepperState(2, 'flagged');
+                document.getElementById('step2-sub').textContent = 'Flagged';
+                setStepperState(3, 'completed');
+                document.getElementById('step3-sub').textContent = res.severity.grade_name;
+            }
+
+            const banner = document.getElementById('alert-banner');
+            const title = document.getElementById('alert-title');
+            const desc = document.getElementById('alert-desc');
+            const icon = document.getElementById('alert-icon');
+            const eyeBadge = document.getElementById('alert-eye-badge');
+            
+            banner.className = `bg-white rounded-lg shadow-sm border-l-4 p-4 flex items-start gap-4 relative overflow-hidden ${isNormal ? 'border-clinical-green' : 'border-clinical-orange'}`;
+            icon.className = `material-symbols-outlined text-3xl ${isNormal ? 'text-clinical-green' : 'text-clinical-orange'}`;
+            eyeBadge.className = `absolute right-32 top-1/2 -translate-y-1/2 opacity-20 ${isNormal ? 'text-clinical-green' : 'text-clinical-orange'}`;
+            
+            icon.textContent = isNormal ? 'check_circle' : 'warning';
+            title.textContent = isNormal ? 'Screening Complete: No Anomalies Detected' : 'Referral Recommended: Anomalies Detected';
+            desc.textContent = res.action;
+            document.getElementById('alert-score').textContent = res.anomaly_score.toFixed(4);
+            
+            const statusEl = document.getElementById('metric-status');
+            statusEl.textContent = isNormal ? 'Normal' : 'Flagged';
+            statusEl.className = `text-lg font-bold uppercase ${isNormal ? 'text-clinical-green' : 'text-clinical-orange'}`;
+            
+            document.getElementById('metric-severity').textContent = res.severity ? res.severity.grade_name : 'N/A';
+            document.getElementById('metric-confidence').textContent = res.severity ? res.severity.confidence_pct.toFixed(1) + '%' : 'N/A';
+            document.getElementById('metric-time').textContent = res.timings.total_ms + ' ms';
+            
+            const riskCard = document.getElementById('risk-card');
+            const riskBars = document.getElementById('risk-bars-container');
+            if(res.severity && res.severity.probabilities) {
+                riskCard.classList.remove('hidden');
+                riskBars.innerHTML = '';
+                
+                const probs = res.severity.probabilities;
+                const colors = ['bg-clinical-green', 'bg-blue-300', 'bg-clinical-blue', 'bg-clinical-orange', 'bg-red-800'];
+                const names = ['No DR', 'Mild', 'Moderate', 'Severe', 'Proliferative'];
+                const pKeys = Object.keys(probs);
+                
+                names.forEach((name, idx) => {
+                    const keyMatch = pKeys.find(k => k.includes(name) || name.includes(k));
+                    const val = keyMatch ? probs[keyMatch] : 0;
+                    const pct = (val * 100).toFixed(1);
+                    const isPredicted = idx === res.severity.grade;
+                    
+                    riskBars.innerHTML += `
+                        <div class="flex items-center gap-2 ${isPredicted ? 'font-black text-text-primary' : 'text-sm text-text-muted'}">
+                            <div class="w-24 flex-shrink-0 text-right truncate">${name}</div>
+                            <div class="flex-grow h-3 bg-slate-100 rounded-full overflow-hidden">
+                                <div class="h-full ${colors[idx]}" style="width: ${pct}%"></div>
+                            </div>
+                            <div class="w-12 text-right">${pct}%</div>
+                        </div>
+                    `;
+                });
+            } else {
+                riskCard.classList.add('hidden');
+            }
+
+            const tCont = document.getElementById('timing-container');
+            tCont.innerHTML = `
+                <div class="flex justify-between border-b border-slate-100 pb-1"><span>Preprocessing:</span> <span class="font-medium">${res.timings.preprocess_ms} ms</span></div>
+                <div class="flex justify-between border-b border-slate-100 pb-1 pt-1"><span>Stage 1 (Gate):</span> <span class="font-medium">${res.timings.stage1_ms} ms</span></div>
+                ${res.timings.stage2_ms ? `<div class="flex justify-between border-b border-slate-100 pb-1 pt-1"><span>Stage 2 (Classify):</span> <span class="font-medium">${res.timings.stage2_ms} ms</span></div>` : ''}
+            `;
+            
+            const visCol = document.getElementById('visual-column');
+            if(res.severity && res.cam_heatmap) {
+                visCol.classList.remove('hidden');
+                
+                document.getElementById('badge-lesion-load').textContent = (res.cam_lesion_load * 100).toFixed(1) + '%';
+                
+                const heatmapDataUrl = 'data:image/png;base64,' + res.cam_heatmap;
+                
+                document.getElementById('img-orig-sbs').style.backgroundImage = `url('${uploadedImageB64}')`;
+                document.getElementById('img-heat-sbs').style.backgroundImage = `url('${heatmapDataUrl}')`;
+                
+                document.getElementById('img-orig-single').style.backgroundImage = `url('${uploadedImageB64}')`;
+                document.getElementById('img-heat-single').style.backgroundImage = `url('${heatmapDataUrl}')`;
+                
+                document.getElementById('finding-grade').textContent = `Predicted: ${res.severity.grade_name}`;
+                document.getElementById('finding-lesion').textContent = `Grad-CAM analysis highlights areas contributing to the classification. Lesion load metric is ${(res.cam_lesion_load*100).toFixed(1)}%.`;
+                
+                switchView('side-by-side', document.querySelector('.view-btn'));
+            } else {
+                visCol.classList.add('hidden');
+            }
+            
+            setTimeout(() => {
+                content.scrollIntoView({ behavior: 'smooth', block: 'start' });
+            }, 100);
+        }
+        
+        function switchView(mode, btn) {
+            document.querySelectorAll('.view-btn').forEach(b => b.classList.remove('active'));
+            btn.classList.add('active');
+            
+            document.getElementById('view-side-by-side').classList.add('hidden');
+            document.getElementById('view-original').classList.add('hidden');
+            document.getElementById('view-heatmap').classList.add('hidden');
+            
+            document.getElementById(`view-${mode}`).classList.remove('hidden');
+        }
+
+        function generateReport() {
+            if(!lastResults) return;
+            // Fake entry mapping to use our combined history generator
+            const dummyHistoryItem = {
+                timestamp: new Date().toISOString(),
+                gate: lastResults.gate,
+                action: lastResults.action,
+                anomaly_score: lastResults.anomaly_score,
+                severity_grade: lastResults.severity ? lastResults.severity.grade : null,
+                severity_name: lastResults.severity ? lastResults.severity.grade_name : null,
+                confidence_pct: lastResults.severity ? lastResults.severity.confidence_pct : null,
+                lesion_load: lastResults.cam_lesion_load,
+                original_b64: uploadedImageB64,
+                heatmap_b64: lastResults.cam_heatmap,
+                full_json: lastResults
+            };
+            
+            // Push dummy to historyData so generator works
+            historyData.push(dummyHistoryItem);
+            generateReportFromHistory(historyData.length - 1);
+            historyData.pop();
+        }
+    </script>
 </body>
 </html>
 """
 
+def init_db(db_path):
+    conn = sqlite3.connect(db_path)
+    c = conn.cursor()
+    c.execute("""
+        CREATE TABLE IF NOT EXISTS patients (
+            id TEXT PRIMARY KEY,
+            patient_id TEXT UNIQUE NOT NULL,
+            name TEXT NOT NULL,
+            email TEXT UNIQUE NOT NULL,
+            password_hash TEXT NOT NULL,
+            diabetes_type TEXT DEFAULT 'Not Specified',
+            created_at TEXT NOT NULL
+        )
+    """)
+    c.execute("""
+        CREATE TABLE IF NOT EXISTS screening_history (
+            id TEXT PRIMARY KEY,
+            patient_id TEXT NOT NULL,
+            timestamp TEXT NOT NULL,
+            gate TEXT NOT NULL,
+            action TEXT NOT NULL,
+            anomaly_score REAL NOT NULL,
+            severity_grade INTEGER,
+            severity_name TEXT,
+            confidence_pct REAL,
+            lesion_load REAL,
+            blood_sugar_level REAL,
+            diabetes_type TEXT,
+            rejected INTEGER DEFAULT 0,
+            rejection_reason TEXT,
+            original_b64 TEXT,
+            heatmap_b64 TEXT,
+            full_json TEXT NOT NULL,
+            FOREIGN KEY(patient_id) REFERENCES patients(patient_id)
+        )
+    """)
+    # Migration: add new columns to existing tables if they don't exist
+    try:
+        c.execute("ALTER TABLE patients ADD COLUMN diabetes_type TEXT DEFAULT 'Not Specified'")
+    except sqlite3.OperationalError:
+        pass
+    try:
+        c.execute("ALTER TABLE screening_history ADD COLUMN blood_sugar_level REAL")
+    except sqlite3.OperationalError:
+        pass
+    try:
+        c.execute("ALTER TABLE screening_history ADD COLUMN diabetes_type TEXT")
+    except sqlite3.OperationalError:
+        pass
+    try:
+        c.execute("ALTER TABLE screening_history ADD COLUMN rejected INTEGER DEFAULT 0")
+    except sqlite3.OperationalError:
+        pass
+    try:
+        c.execute("ALTER TABLE screening_history ADD COLUMN rejection_reason TEXT")
+    except sqlite3.OperationalError:
+        pass
+    conn.commit()
+    conn.close()
+
+def hash_password(password):
+    salt = "retinaAI_salt_"
+    return hashlib.sha256((salt + password).encode('utf-8')).hexdigest()
+
+def verify_password(password, password_hash):
+    return hash_password(password) == password_hash
+
+def login_required(f):
+    @wraps(f)
+    def decorated_function(*args, **kwargs):
+        if not session.get('patient_id'):
+            return redirect(url_for('login'))
+        return f(*args, **kwargs)
+    return decorated_function
 
 def create_app(models_dir, threads):
     app = Flask(__name__)
-    pipe = DRPipeline(models_dir, threads=threads)
+    app.secret_key = os.urandom(24).hex()
+    
+    db_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'patients.db')
+    init_db(db_path)
+    
+    pipe = DRPipeline(models_dir=models_dir, threads=threads)
+    
+    def get_db():
+        return sqlite3.connect(db_path)
 
-    @app.get("/")
+    @app.route('/', methods=['GET'])
     def index():
-        return render_template_string(HTML_TEMPLATE)
+        if session.get('patient_id'):
+            return redirect(url_for('dashboard'))
+        return redirect(url_for('login'))
 
-    @app.post("/api/analyze")
+    @app.route('/login', methods=['GET'])
+    def login():
+        if session.get('patient_id'):
+            return redirect(url_for('dashboard'))
+        return render_template_string(AUTH_TEMPLATE)
+
+    @app.route('/api/login', methods=['POST'])
+    def api_login():
+        data = request.json
+        email = data.get('email')
+        password = data.get('password')
+        
+        conn = get_db()
+        c = conn.cursor()
+        c.execute('SELECT id, patient_id, name, password_hash FROM patients WHERE email = ?', (email,))
+        row = c.fetchone()
+        conn.close()
+        
+        if row and verify_password(password, row[3]):
+            session['patient_id'] = row[1]
+            session['patient_name'] = row[2]
+            session['patient_email'] = email
+            return jsonify({"success": True, "name": row[2], "patient_id": row[1]})
+        
+        return jsonify({"success": False, "error": "Invalid email or password"})
+
+    @app.route('/api/signup', methods=['POST'])
+    def api_signup():
+        data = request.json
+        name = data.get('name')
+        email = data.get('email')
+        password = data.get('password')
+        diabetes_type = data.get('diabetes_type', 'Not Specified')
+        
+        if not name or not email or not password:
+            return jsonify({"success": False, "error": "All fields are required"})
+        
+        if diabetes_type not in ['Prediabetic', 'Type 1 Diabetes', 'Type 2 Diabetes', 'Not Specified']:
+            diabetes_type = 'Not Specified'
+            
+        conn = get_db()
+        c = conn.cursor()
+        
+        c.execute('SELECT id FROM patients WHERE email = ?', (email,))
+        if c.fetchone():
+            conn.close()
+            return jsonify({"success": False, "error": "Email already registered"})
+            
+        patient_id = f"IND-{random.randint(1000, 9999)}-PT"
+        
+        c.execute('SELECT id FROM patients WHERE patient_id = ?', (patient_id,))
+        while c.fetchone():
+            patient_id = f"IND-{random.randint(1000, 9999)}-PT"
+            c.execute('SELECT id FROM patients WHERE patient_id = ?', (patient_id,))
+            
+        db_id = str(uuid.uuid4())
+        hashed = hash_password(password)
+        created_at = datetime.now().isoformat()
+        
+        c.execute('''
+            INSERT INTO patients (id, patient_id, name, email, password_hash, diabetes_type, created_at)
+            VALUES (?, ?, ?, ?, ?, ?, ?)
+        ''', (db_id, patient_id, name, email, hashed, diabetes_type, created_at))
+        
+        conn.commit()
+        conn.close()
+        
+        session['diabetes_type'] = diabetes_type
+        return jsonify({"success": True, "name": name, "patient_id": patient_id, "diabetes_type": diabetes_type})
+
+    @app.route('/dashboard', methods=['GET'])
+    @login_required
+    def dashboard():
+        return render_template_string(
+            DASHBOARD_TEMPLATE,
+            patient_name=session.get('patient_name'),
+            patient_id=session.get('patient_id'),
+            patient_email=session.get('patient_email')
+        )
+
+    @app.route('/api/analyze', methods=['POST'])
+    @login_required
     def analyze():
-        f = request.files.get("image")
-        if not f:
-            return jsonify({"error": "No image uploaded"}), 400
-
-        with tempfile.NamedTemporaryFile(suffix=Path(f.filename).suffix or ".jpg", delete=False) as tmp:
-            f.save(tmp.name)
-            tmp_path = tmp.name
-
+        if 'file' not in request.files:
+            return jsonify({"error": "No file uploaded"}), 400
+        
+        file = request.files['file']
+        if file.filename == '':
+            return jsonify({"error": "No file selected"}), 400
+        
+        # Task 4: Blood sugar level (required field)
+        blood_sugar = request.form.get('blood_sugar', None)
+        if blood_sugar:
+            try:
+                blood_sugar = float(blood_sugar)
+            except ValueError:
+                blood_sugar = None
+            
+        with tempfile.NamedTemporaryFile(delete=False, suffix=Path(file.filename).suffix) as temp_file:
+            file.save(temp_file.name)
+            tmp_path = temp_file.name
+            
         try:
-            res = pipe.run(tmp_path)
+            with open(tmp_path, "rb") as f:
+                uploaded_b64 = base64.b64encode(f.read()).decode('utf-8')
+            
+            results = pipe.run(tmp_path)
+            
+            record_id = str(uuid.uuid4())
+            ts = datetime.now().isoformat()
+            gate = results.get('gate', '')
+            action = results.get('action', '')
+            anomaly_score = results.get('anomaly_score', 0.0)
+            
+            severity = results.get('severity') or {}
+            severity_grade = severity.get('grade')
+            severity_name = severity.get('grade_name')
+            confidence_pct = severity.get('confidence_pct')
+            
+            lesion_load = results.get('cam_lesion_load')
+            heatmap_b64 = results.get('cam_heatmap')
+            
+            # Task 2: Rejection info
+            rejection = severity.get('rejection', {})
+            rejected = 1 if rejection.get('rejected', False) else 0
+            rejection_reason = rejection.get('reason', '')
+            
+            # Task 4: Get diabetes type from patient record
+            conn = get_db()
+            c = conn.cursor()
+            c.execute('SELECT diabetes_type FROM patients WHERE patient_id = ?', (session['patient_id'],))
+            pt_row = c.fetchone()
+            diabetes_type = pt_row[0] if pt_row else 'Not Specified'
+            
+            # Task 1: Fetch previous screening for comparison
+            c.execute('''
+                SELECT severity_grade, severity_name, confidence_pct, lesion_load,
+                       timestamp, blood_sugar_level, rejected
+                FROM screening_history
+                WHERE patient_id = ? AND severity_grade IS NOT NULL
+                ORDER BY timestamp DESC LIMIT 1
+            ''', (session['patient_id'],))
+            prev_row = c.fetchone()
+            
+            comparison = None
+            if prev_row and severity_grade is not None:
+                prev_grade = prev_row[0]
+                prev_name = prev_row[1]
+                prev_conf = prev_row[2]
+                prev_lesion = prev_row[3]
+                prev_date = prev_row[4]
+                prev_sugar = prev_row[5]
+                
+                if prev_grade is not None:
+                    grade_diff = severity_grade - prev_grade
+                    if grade_diff > 0:
+                        grade_change = "worsened"
+                    elif grade_diff < 0:
+                        grade_change = "improved"
+                    else:
+                        grade_change = "stable"
+                    
+                    lesion_diff = None
+                    if lesion_load is not None and prev_lesion is not None:
+                        lesion_diff = round(lesion_load - prev_lesion, 4)
+                    
+                    comparison = {
+                        "previous_grade": prev_grade,
+                        "previous_name": prev_name,
+                        "current_grade": severity_grade,
+                        "current_name": severity_name,
+                        "grade_change": grade_change,
+                        "grade_diff": grade_diff,
+                        "previous_lesion_load": prev_lesion,
+                        "current_lesion_load": lesion_load,
+                        "lesion_load_diff": lesion_diff,
+                        "previous_confidence": prev_conf,
+                        "previous_date": prev_date,
+                        "previous_blood_sugar": prev_sugar,
+                    }
+            
+            # Store to database
+            c.execute('''
+                INSERT INTO screening_history (
+                    id, patient_id, timestamp, gate, action, anomaly_score,
+                    severity_grade, severity_name, confidence_pct, lesion_load,
+                    blood_sugar_level, diabetes_type, rejected, rejection_reason,
+                    original_b64, heatmap_b64, full_json
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            ''', (
+                record_id, session['patient_id'], ts, gate, action, anomaly_score,
+                severity_grade, severity_name, confidence_pct, lesion_load,
+                blood_sugar, diabetes_type, rejected, rejection_reason,
+                uploaded_b64, heatmap_b64, json.dumps(results)
+            ))
+            conn.commit()
+            conn.close()
+            
+            results['history_id'] = record_id
+            results['blood_sugar_level'] = blood_sugar
+            results['diabetes_type'] = diabetes_type
+            if comparison:
+                results['comparison'] = comparison
+            
         finally:
             if os.path.exists(tmp_path):
                 os.remove(tmp_path)
+                
+        return jsonify(results)
 
-        return jsonify(res)
+    @app.route('/api/history', methods=['GET'])
+    @login_required
+    def history():
+        conn = get_db()
+        c = conn.cursor()
+        c.execute('''
+            SELECT 
+                id, timestamp, gate, action, anomaly_score, 
+                severity_grade, severity_name, confidence_pct, lesion_load, 
+                original_b64, heatmap_b64, full_json
+            FROM screening_history
+            WHERE patient_id = ?
+            ORDER BY timestamp DESC
+        ''', (session['patient_id'],))
+        
+        rows = c.fetchall()
+        conn.close()
+        
+        history_list = []
+        for row in rows:
+            history_list.append({
+                "id": row[0],
+                "timestamp": row[1],
+                "gate": row[2],
+                "action": row[3],
+                "anomaly_score": row[4],
+                "severity_grade": row[5],
+                "severity_name": row[6],
+                "confidence_pct": row[7],
+                "lesion_load": row[8],
+                "original_b64": row[9],
+                "heatmap_b64": row[10],
+                "full_json": json.loads(row[11])
+            })
+            
+        return jsonify({"success": True, "history": history_list})
 
-    @app.get("/health")
+    @app.route('/health', methods=['GET'])
     def health():
         return jsonify({"status": "ok"})
+        
+    @app.route('/logout', methods=['GET'])
+    def logout():
+        session.clear()
+        return redirect(url_for('login'))
 
     return app
 
-
 def main():
-    ap = argparse.ArgumentParser(description="DR Screening Pipeline Web App")
-    ap.add_argument("--models", default="models", help="Directory containing model files")
-    ap.add_argument("--host", default="0.0.0.0", help="Host interface to bind")
-    ap.add_argument("--port", type=int, default=5000, help="Port to listen on")
-    ap.add_argument("--threads", type=int, default=4, help="CPU threads for ONNX Runtime")
-    args = ap.parse_args()
-
+    parser = argparse.ArgumentParser(description="RetinaAI Demo App")
+    parser.add_argument('--models', type=str, default='models', help="Path to models directory")
+    parser.add_argument('--host', type=str, default='0.0.0.0', help="Host address")
+    parser.add_argument('--port', type=int, default=5000, help="Port number")
+    parser.add_argument('--threads', type=int, default=1, help="Number of threads for inference")
+    args = parser.parse_args()
+    
     app = create_app(args.models, args.threads)
-    print(f"\n\U0001f680 RetinaAI Web App running at http://{args.host}:{args.port}")
-    print(f"\U0001f449 Access from browser: http://localhost:{args.port}\n")
-    app.run(host=args.host, port=args.port)
-
+    app.run(host=args.host, port=args.port, debug=False)
 
 if __name__ == "__main__":
     main()
