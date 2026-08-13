@@ -77,6 +77,21 @@ def all_images(root):
     return [p for p in Path(root).rglob("*") if p.is_file() and p.suffix.lower() in IMG_EXTS]
 
 
+def find_default_data_root():
+    """Look for standard dataset directories in common locations."""
+    candidates = [
+        Path("."),
+        Path(".."),
+        Path("../.."),
+        Path("c:/Users/Prath/DR_KAGGLE"),
+        Path("/kaggle/input/datasets/lakshmiprathik"),
+    ]
+    for c in candidates:
+        if (c / "IDRiD").exists() or (c / "APTOS").exists() or (c / "idrid-516").exists():
+            return c.resolve()
+    return None
+
+
 def build_dataset(idrid_root, aptos_root, odir_root):
     """Reproduce the exact dataset + split from the training notebook."""
     import pandas as pd
@@ -84,37 +99,76 @@ def build_dataset(idrid_root, aptos_root, odir_root):
 
     rows = []
 
-    # IDRiD
-    for split in ["train", "validation", "test"]:
-        for grade in range(5):
-            folder = Path(idrid_root) / split / str(grade)
-            if not folder.exists():
-                continue
-            for p in all_images(folder):
-                rows.append({"path": str(p), "grade": grade, "source": "idrid"})
+    # 1. IDRiD
+    idrid_path = Path(idrid_root)
+    if idrid_path.exists():
+        for split in ["train", "validation", "test"]:
+            for grade in range(5):
+                folder = idrid_path / split / str(grade)
+                if folder.exists():
+                    for p in all_images(folder):
+                        rows.append({"path": str(p), "grade": grade, "source": "idrid"})
+        # Also check if direct grade folders exist (e.g. IDRiD/0, IDRiD/1)
+        if not rows:
+            for grade in range(5):
+                folder = idrid_path / str(grade)
+                if folder.exists():
+                    for p in all_images(folder):
+                        rows.append({"path": str(p), "grade": grade, "source": "idrid"})
 
-    # APTOS
-    aptos_csv = Path(aptos_root) / "train_1.csv"
-    aptos_img_dir = Path(aptos_root) / "train_images" / "train_images"
-    if not aptos_img_dir.exists():
-        aptos_img_dir = Path(aptos_root) / "train_images"
-    if aptos_csv.exists():
-        df_aptos = pd.read_csv(aptos_csv)
-        for row in df_aptos.itertuples(index=False):
-            candidates = [aptos_img_dir / f"{row.id_code}.png",
-                          aptos_img_dir / f"{row.id_code}.jpg",
-                          aptos_img_dir / f"{row.id_code}.jpeg"]
-            img_path = next((p for p in candidates if p.exists()), None)
-            if img_path:
-                rows.append({"path": str(img_path), "grade": int(row.diagnosis), "source": "aptos"})
+    # 2. APTOS
+    aptos_path = Path(aptos_root)
+    if aptos_path.exists():
+        # Check all CSV files in APTOS directory (train_1.csv, valid.csv, test.csv, train.csv)
+        csv_files = list(aptos_path.glob("*.csv"))
+        img_dirs = [
+            aptos_path / "train_images" / "train_images",
+            aptos_path / "train_images",
+            aptos_path / "val_images",
+            aptos_path / "test_images",
+            aptos_path / "images",
+            aptos_path,
+        ]
+        valid_img_dirs = [d for d in img_dirs if d.exists() and d.is_dir()]
 
-    # ODIR (capped healthy)
-    odir_imgs = all_images(odir_root)
-    if len(odir_imgs) > ODIR_CAP:
-        idx = np.random.RandomState(SEED).choice(len(odir_imgs), size=ODIR_CAP, replace=False)
-        odir_imgs = [odir_imgs[i] for i in idx]
-    for p in odir_imgs:
-        rows.append({"path": str(p), "grade": 0, "source": "odir"})
+        for csv_f in csv_files:
+            try:
+                df_aptos = pd.read_csv(csv_f)
+                id_col = next((col for col in ["id_code", "image_id", "id"] if col in df_aptos.columns), None)
+                diag_col = next((col for col in ["diagnosis", "grade", "label"] if col in df_aptos.columns), None)
+                if id_col and diag_col:
+                    for row in df_aptos.itertuples(index=False):
+                        image_id = str(getattr(row, id_col))
+                        grade_val = int(getattr(row, diag_col))
+                        # Look for image file across candidate directories
+                        for img_dir in valid_img_dirs:
+                            for ext in [".png", ".jpg", ".jpeg", ".bmp"]:
+                                cand = img_dir / f"{image_id}{ext}"
+                                if cand.exists():
+                                    rows.append({"path": str(cand), "grade": grade_val, "source": "aptos"})
+                                    break
+            except Exception as e:
+                print(f"Warning reading {csv_f}: {e}")
+
+    # 3. ODIR (capped healthy)
+    odir_path = Path(odir_root)
+    if odir_path.exists():
+        odir_imgs = all_images(odir_path)
+        if len(odir_imgs) > ODIR_CAP:
+            idx = np.random.RandomState(SEED).choice(len(odir_imgs), size=ODIR_CAP, replace=False)
+            odir_imgs = [odir_imgs[i] for i in idx]
+        for p in odir_imgs:
+            rows.append({"path": str(p), "grade": 0, "source": "odir"})
+
+    if not rows:
+        raise RuntimeError(
+            f"No images found!\n"
+            f"Searched locations:\n"
+            f"  - IDRiD: {idrid_root} (exists: {Path(idrid_root).exists()})\n"
+            f"  - APTOS: {aptos_root} (exists: {Path(aptos_root).exists()})\n"
+            f"  - ODIR:  {odir_root} (exists: {Path(odir_root).exists()})\n\n"
+            f"Please run with: python compute_ece.py --data-root c:\\Users\\Prath\\DR_KAGGLE"
+        )
 
     df = pd.DataFrame(rows).drop_duplicates(subset="path").reset_index(drop=True)
     df["grade"] = df["grade"].astype(int)
@@ -223,12 +277,20 @@ def main():
     args = ap.parse_args()
 
     # Resolve dataset paths
-    if args.data_root:
-        idrid = Path(args.data_root) / "IDRiD"
-        aptos = Path(args.data_root) / "APTOS"
-        odir = Path(args.data_root) / "ODIR-5K"
+    if args.data_root and args.data_root != "/path/to/datasets":
+        root_path = Path(args.data_root)
+    else:
+        auto_root = find_default_data_root()
+        root_path = auto_root if auto_root is not None else Path("c:/Users/Prath/DR_KAGGLE")
+
+    if (root_path / "IDRiD").exists() or (root_path / "APTOS").exists():
+        idrid = root_path / "IDRiD"
+        aptos = root_path / "APTOS"
+        odir = root_path / "ODIR-5K"
     else:
         idrid, aptos, odir = KAGGLE_IDRID, KAGGLE_APTOS, KAGGLE_ODIR
+
+    print(f"Using dataset paths:\n  IDRiD: {idrid}\n  APTOS: {aptos}\n  ODIR:  {odir}")
 
     # Load models
     models_dir = Path(args.models)
