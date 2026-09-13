@@ -7,11 +7,13 @@ import sqlite3
 import tempfile
 import uuid
 import random
+import io
 from datetime import datetime
 from pathlib import Path
-from flask import Flask, jsonify, redirect, render_template_string, request, session, url_for
+from flask import Flask, jsonify, redirect, render_template_string, request, session, url_for, send_file
 from functools import wraps
 from inference import DRPipeline
+from report_generator import generate_pdf_report
 
 AUTH_TEMPLATE = r"""<!DOCTYPE html>
 <html lang="en">
@@ -20,16 +22,14 @@ AUTH_TEMPLATE = r"""<!DOCTYPE html>
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>RetinaAI - Authentication</title>
     
-    <!-- Google Fonts: IBM Plex Sans -->
-    <link rel="preconnect" href="https://fonts.googleapis.com">
-    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-    <link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+    <!-- IBM Plex Sans (local) -->
+    <link href="/static/css/ibm-plex-sans.css" rel="stylesheet">
     
-    <!-- Material Symbols Outlined -->
-    <link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:wght,FILL@100..700,0..1&display=swap" rel="stylesheet" />
+    <!-- Material Symbols Outlined (local) -->
+    <link href="/static/css/material-symbols.css" rel="stylesheet" />
 
-    <!-- Tailwind CSS -->
-    <script src="https://cdn.tailwindcss.com?plugins=forms,container-queries"></script>
+    <!-- Tailwind CSS (local) -->
+    <script src="/static/js/tailwind.js"></script>
     <script>
         tailwind.config = {
             theme: {
@@ -296,16 +296,17 @@ DASHBOARD_TEMPLATE = r"""<!DOCTYPE html>
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>RetinaAI - Medical Diagnostic UI</title>
     
-    <!-- Google Fonts: IBM Plex Sans -->
-    <link rel="preconnect" href="https://fonts.googleapis.com">
-    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-    <link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+    <!-- IBM Plex Sans (local) -->
+    <link href="/static/css/ibm-plex-sans.css" rel="stylesheet">
     
-    <!-- Material Symbols Outlined -->
-    <link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:wght,FILL@100..700,0..1&display=swap" rel="stylesheet" />
+    <!-- Material Symbols Outlined (local) -->
+    <link href="/static/css/material-symbols.css" rel="stylesheet" />
 
-    <!-- Tailwind CSS -->
-    <script src="https://cdn.tailwindcss.com?plugins=forms,container-queries"></script>
+    <!-- html2pdf.js (local fallback) -->
+    <script src="/static/js/html2pdf.bundle.min.js"></script>
+
+    <!-- Tailwind CSS (local) -->
+    <script src="/static/js/tailwind.js"></script>
     <script>
         tailwind.config = {
             theme: {
@@ -390,6 +391,45 @@ DASHBOARD_TEMPLATE = r"""<!DOCTYPE html>
         @keyframes fadeIn {
             from { opacity: 0; transform: translateY(10px); }
             to { opacity: 1; transform: translateY(0); }
+        }
+
+        /* ── Pipeline Animation Styles ── */
+        .pipe-step.active {
+            opacity: 1 !important;
+            border-color: #005596 !important;
+            background-color: #f0f7ff;
+        }
+        .pipe-step.active .pipe-dot {
+            background-color: #005596 !important;
+            animation: pipe-scan 0.8s ease-in-out infinite alternate;
+        }
+        .pipe-step.active .pipe-dot span {
+            color: white !important;
+        }
+        .pipe-step.done-ok {
+            opacity: 1 !important;
+            border-color: #008a4b !important;
+            background-color: #f0faf5;
+        }
+        .pipe-step.done-ok .pipe-dot {
+            background-color: #008a4b !important;
+        }
+        .pipe-step.done-ok .pipe-dot span { color: white !important; }
+        .pipe-step.done-warn {
+            opacity: 1 !important;
+            border-color: #f05a28 !important;
+            background-color: #fff7f4;
+        }
+        .pipe-step.done-warn .pipe-dot { background-color: #f05a28 !important; }
+        .pipe-step.done-warn .pipe-dot span { color: white !important; }
+        .pipe-step.skipped {
+            opacity: 0.45 !important;
+        }
+        .pipe-arrow.lit { opacity: 1 !important; }
+        .pipe-arrow.lit span { color: #005596; }
+        @keyframes pipe-scan {
+            from { box-shadow: 0 0 0 0 rgba(0,85,150,0.4); }
+            to   { box-shadow: 0 0 0 8px rgba(0,85,150,0); }
         }
         
         .view-btn {
@@ -487,10 +527,10 @@ DASHBOARD_TEMPLATE = r"""<!DOCTYPE html>
                     <span class="text-sm font-medium text-text-muted">System Ready</span>
                 </div>
                 <button id="btnDownloadReport" onclick="generateReport()" class="hidden bg-clinical-blue hover:bg-blue-800 text-white px-4 py-2 rounded-md text-sm font-medium transition-colors flex items-center gap-2">
-                    <span class="material-symbols-outlined text-[20px]">download</span>
-                    Download Report
+                    <span class="material-symbols-outlined text-[20px]">picture_as_pdf</span>
+                    Download PDF Report
                 </button>
-                <button onclick="generateReport()" class="border border-border-color text-text-primary hover:bg-slate-50 px-4 py-2 rounded-md text-sm font-medium transition-colors flex items-center gap-2">
+                <button onclick="window.print()" class="border border-border-color text-text-primary hover:bg-slate-50 px-4 py-2 rounded-md text-sm font-medium transition-colors flex items-center gap-2">
                     <span class="material-symbols-outlined text-[20px]">print</span>
                     Print
                 </button>
@@ -668,6 +708,128 @@ DASHBOARD_TEMPLATE = r"""<!DOCTYPE html>
                                 <!-- Populated dynamically -->
                             </div>
                         </div>
+
+                        <!-- ═══════════════════════════════════════════════ -->
+                        <!-- ANIMATED AI PIPELINE VISUALIZATION             -->
+                        <!-- ═══════════════════════════════════════════════ -->
+                        <div id="pipeline-anim-card" class="hidden bg-white rounded-lg border border-border-color shadow-sm overflow-hidden">
+                            <div class="bg-slate-50 px-4 py-3 border-b border-border-color flex items-center gap-2">
+                                <span class="material-symbols-outlined text-clinical-blue text-[20px]">play_circle</span>
+                                <h3 class="font-semibold text-text-primary text-sm">How Your Image Was Processed</h3>
+                                <span class="ml-auto text-xs text-text-muted italic">AI Pipeline Replay</span>
+                            </div>
+                            <div class="p-4">
+                                <!-- Pipeline steps -->
+                                <div id="pipe-steps" class="space-y-2">
+
+                                    <!-- Step 0: Input -->
+                                    <div id="pipe-step-0" class="pipe-step opacity-30 flex items-center gap-3 p-3 rounded-lg border border-slate-100 transition-all duration-500">
+                                        <div class="pipe-dot w-9 h-9 rounded-full bg-slate-100 flex items-center justify-center flex-shrink-0 transition-all duration-500">
+                                            <span class="material-symbols-outlined text-[18px] text-slate-500">photo_camera</span>
+                                        </div>
+                                        <div class="flex-grow min-w-0">
+                                            <div class="text-xs font-bold text-text-primary">Fundus Image Captured</div>
+                                            <div class="text-xs text-text-muted">Raw retinal photograph received from camera</div>
+                                        </div>
+                                        <div id="pipe-step-0-badge" class="pipe-badge text-xs px-2 py-0.5 rounded-full bg-slate-100 text-slate-500 flex-shrink-0 hidden">Ready</div>
+                                    </div>
+
+                                    <!-- Arrow -->
+                                    <div class="pipe-arrow flex items-center justify-center opacity-20 transition-all duration-500" id="pipe-arrow-0">
+                                        <span class="material-symbols-outlined text-[18px] text-slate-400">arrow_downward</span>
+                                    </div>
+
+                                    <!-- Step 1: Preprocessing -->
+                                    <div id="pipe-step-1" class="pipe-step opacity-30 flex items-center gap-3 p-3 rounded-lg border border-slate-100 transition-all duration-500">
+                                        <div class="pipe-dot w-9 h-9 rounded-full bg-slate-100 flex items-center justify-center flex-shrink-0 transition-all duration-500">
+                                            <span class="material-symbols-outlined text-[18px] text-slate-500">tune</span>
+                                        </div>
+                                        <div class="flex-grow min-w-0">
+                                            <div class="text-xs font-bold text-text-primary">Preprocessing & Enhancement</div>
+                                            <div class="text-xs text-text-muted">Black border crop → CLAHE contrast boost → Resize to 128px & 224px</div>
+                                        </div>
+                                        <div id="pipe-step-1-badge" class="pipe-badge text-xs px-2 py-0.5 rounded-full bg-blue-50 text-clinical-blue flex-shrink-0 hidden" id="badge-preprocess">— ms</div>
+                                    </div>
+
+                                    <!-- Arrow -->
+                                    <div class="pipe-arrow flex items-center justify-center opacity-20 transition-all duration-500" id="pipe-arrow-1">
+                                        <span class="material-symbols-outlined text-[18px] text-slate-400">arrow_downward</span>
+                                    </div>
+
+                                    <!-- Step 2: GANomaly -->
+                                    <div id="pipe-step-2" class="pipe-step opacity-30 flex items-center gap-3 p-3 rounded-lg border border-slate-100 transition-all duration-500">
+                                        <div class="pipe-dot w-9 h-9 rounded-full bg-slate-100 flex items-center justify-center flex-shrink-0 transition-all duration-500">
+                                            <span class="material-symbols-outlined text-[18px] text-slate-500">emergency</span>
+                                        </div>
+                                        <div class="flex-grow min-w-0">
+                                            <div class="text-xs font-bold text-text-primary">Stage 1 — GANomaly Anomaly Gate</div>
+                                            <div class="text-xs text-text-muted" id="pipe-gate-desc">Comparing retina vs. learned healthy patterns to detect any abnormality</div>
+                                        </div>
+                                        <div id="pipe-step-2-badge" class="pipe-badge text-xs px-2 py-0.5 rounded-full bg-blue-50 text-clinical-blue flex-shrink-0 hidden">— ms</div>
+                                    </div>
+
+                                    <!-- Arrow (shown only if Stage 2 ran) -->
+                                    <div class="pipe-arrow flex items-center justify-center opacity-20 transition-all duration-500" id="pipe-arrow-2">
+                                        <span class="material-symbols-outlined text-[18px] text-slate-400">arrow_downward</span>
+                                    </div>
+
+                                    <!-- Step 3: EfficientNet + VBLL -->
+                                    <div id="pipe-step-3" class="pipe-step opacity-30 flex items-center gap-3 p-3 rounded-lg border border-slate-100 transition-all duration-500">
+                                        <div class="pipe-dot w-9 h-9 rounded-full bg-slate-100 flex items-center justify-center flex-shrink-0 transition-all duration-500">
+                                            <span class="material-symbols-outlined text-[18px] text-slate-500">hub</span>
+                                        </div>
+                                        <div class="flex-grow min-w-0">
+                                            <div class="text-xs font-bold text-text-primary">Stage 2 — EfficientNet-B0 + Bayesian Grading</div>
+                                            <div class="text-xs text-text-muted">30 weight samples drawn → probability distribution across 5 DR grades</div>
+                                        </div>
+                                        <div id="pipe-step-3-badge" class="pipe-badge text-xs px-2 py-0.5 rounded-full bg-blue-50 text-clinical-blue flex-shrink-0 hidden">— ms</div>
+                                    </div>
+
+                                    <!-- Arrow -->
+                                    <div class="pipe-arrow flex items-center justify-center opacity-20 transition-all duration-500" id="pipe-arrow-3">
+                                        <span class="material-symbols-outlined text-[18px] text-slate-400">arrow_downward</span>
+                                    </div>
+
+                                    <!-- Step 4: Grad-CAM -->
+                                    <div id="pipe-step-4" class="pipe-step opacity-30 flex items-center gap-3 p-3 rounded-lg border border-slate-100 transition-all duration-500">
+                                        <div class="pipe-dot w-9 h-9 rounded-full bg-slate-100 flex items-center justify-center flex-shrink-0 transition-all duration-500">
+                                            <span class="material-symbols-outlined text-[18px] text-slate-500">visibility</span>
+                                        </div>
+                                        <div class="flex-grow min-w-0">
+                                            <div class="text-xs font-bold text-text-primary">Grad-CAM Explainability Map</div>
+                                            <div class="text-xs text-text-muted">Spatial feature maps × posterior weights → lesion heatmap overlay</div>
+                                        </div>
+                                        <div id="pipe-step-4-badge" class="pipe-badge text-xs px-2 py-0.5 rounded-full hidden">Lesion: —%</div>
+                                    </div>
+
+                                    <!-- Arrow -->
+                                    <div class="pipe-arrow flex items-center justify-center opacity-20 transition-all duration-500" id="pipe-arrow-4">
+                                        <span class="material-symbols-outlined text-[18px] text-slate-400">arrow_downward</span>
+                                    </div>
+
+                                    <!-- Step 5: Final Result -->
+                                    <div id="pipe-step-5" class="pipe-step opacity-30 flex items-center gap-3 p-3 rounded-lg border border-slate-100 transition-all duration-500">
+                                        <div class="pipe-dot w-9 h-9 rounded-full bg-slate-100 flex items-center justify-center flex-shrink-0 transition-all duration-500">
+                                            <span class="material-symbols-outlined text-[18px] text-slate-500">verified</span>
+                                        </div>
+                                        <div class="flex-grow min-w-0">
+                                            <div class="text-xs font-bold text-text-primary">Clinical Decision Ready</div>
+                                            <div class="text-xs text-text-muted" id="pipe-final-desc">Grade determined with uncertainty check and rejection evaluation</div>
+                                        </div>
+                                        <div id="pipe-step-5-badge" class="pipe-badge text-xs px-2 py-0.5 rounded-full hidden font-bold">—</div>
+                                    </div>
+
+                                </div><!-- /pipe-steps -->
+
+                                <!-- Total bar -->
+                                <div id="pipe-total-bar" class="hidden mt-4 pt-3 border-t border-slate-100 flex items-center justify-between text-xs">
+                                    <span class="text-text-muted font-medium">Total Pipeline Time on Raspberry Pi</span>
+                                    <span id="pipe-total-ms" class="font-bold text-clinical-blue text-sm">— ms</span>
+                                </div>
+                            </div>
+                        </div>
+                        <!-- ═══════════════════════════════════════════════ -->
+
                     </div>
 
                     <!-- Right Column: Visualizations -->
@@ -896,8 +1058,8 @@ DASHBOARD_TEMPLATE = r"""<!DOCTYPE html>
                         ${imgsHtml}
                         
                         <div class="mt-4 flex gap-3">
-                            <button onclick='generateReportFromHistory(${index})' class="text-sm text-clinical-blue hover:underline flex items-center gap-1">
-                                <span class="material-symbols-outlined text-[16px]">download</span> Download Report
+                            <button onclick='generateReportFromHistory(${index})' class="text-sm bg-blue-50 text-clinical-blue hover:bg-blue-100 px-3 py-1.5 rounded-md font-medium flex items-center gap-1.5 transition-colors border border-blue-200">
+                                <span class="material-symbols-outlined text-[18px]">picture_as_pdf</span> Download PDF Report
                             </button>
                         </div>
                     </div>
@@ -916,115 +1078,19 @@ DASHBOARD_TEMPLATE = r"""<!DOCTYPE html>
         }
 
         function generateReportFromHistory(index) {
-            const item = historyData[index];
-            const r = item.full_json;
-            const isNormal = r.gate === 'normal_gate';
-            const dateStr = new Date(item.timestamp).toLocaleString();
-            
-            const origB64 = item.original_b64.startsWith('data:') ? item.original_b64 : 'data:image/jpeg;base64,' + item.original_b64;
-
-            let heatmapSection = '';
-            if(r.cam_heatmap) {
-                heatmapSection = `
-                <div class="section" style="page-break-inside: avoid;">
-                    <h2>Visual Analysis (Grad-CAM)</h2>
-                    <div style="display: flex; gap: 20px;">
-                        <div style="flex: 1;">
-                            <h4>Original Image</h4>
-                            <img src="${origB64}" style="width: 100%; border: 1px solid #ccc;">
-                        </div>
-                        <div style="flex: 1;">
-                            <h4>Heatmap Analysis</h4>
-                            <img src="data:image/png;base64,${r.cam_heatmap}" style="width: 100%; border: 1px solid #ccc;">
-                        </div>
-                    </div>
-                    <p style="margin-top: 10px;"><strong>Lesion Load:</strong> ${(r.cam_lesion_load*100).toFixed(1)}%</p>
-                </div>`;
+            let item = null;
+            if (typeof index === 'number' && historyData && historyData[index]) {
+                item = historyData[index];
             }
-            
-            let severitySection = '';
-            if(r.severity) {
-                let probsHtml = '';
-                for(let [k,v] of Object.entries(r.severity.probabilities)) {
-                    probsHtml += `<li>${k}: ${(v*100).toFixed(2)}%</li>`;
-                }
-                
-                severitySection = `
-                <div class="section">
-                    <h2>Severity Assessment</h2>
-                    <p><strong>Predicted Grade:</strong> ${r.severity.grade_name} (Grade ${r.severity.grade})</p>
-                    <p><strong>AI Confidence:</strong> ${r.severity.confidence_pct.toFixed(2)}%</p>
-                    <h4>Risk Distribution:</h4>
-                    <ul>${probsHtml}</ul>
-                </div>`;
+            if (item && item.id) {
+                window.location.href = `/api/report/${item.id}/pdf`;
+                return;
             }
-
-            const htmlContent = `
-<!DOCTYPE html>
-<html>
-<head>
-    <title>Diagnostic Report - ${PATIENT_NAME} (${PATIENT_ID})</title>
-    <link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans:wght@400;600;700&display=swap" rel="stylesheet">
-    <style>
-        body { font-family: 'IBM Plex Sans', sans-serif; color: #1e293b; max-width: 800px; margin: 0 auto; padding: 40px; background: #fff; line-height: 1.6; }
-        .header { border-bottom: 2px solid #005596; padding-bottom: 20px; margin-bottom: 30px; }
-        .header h1 { color: #005596; margin: 0 0 10px 0; }
-        .meta { display: flex; justify-content: space-between; color: #64748b; font-size: 0.9em; }
-        .section { background: #f8fafc; border: 1px solid #e2e8f0; padding: 20px; border-radius: 8px; margin-bottom: 20px; }
-        h2 { color: #005596; margin-top: 0; font-size: 1.2em; border-bottom: 1px solid #cbd5e1; padding-bottom: 8px; }
-        .alert { padding: 15px; border-left: 5px solid ${isNormal ? '#008a4b' : '#f05a28'}; background: #fff; margin-bottom: 20px; border-radius: 4px; box-shadow: 0 1px 3px rgba(0,0,0,0.1); }
-        .footer { margin-top: 50px; font-size: 0.8em; color: #94a3b8; text-align: center; border-top: 1px solid #e2e8f0; padding-top: 20px; font-style: italic; }
-    </style>
-</head>
-<body>
-    <div class="header">
-        <h1>RetinaAI Diagnostic Report</h1>
-        <div class="meta">
-            <span><strong>Patient:</strong> ${PATIENT_NAME} (${PATIENT_ID})</span>
-            <span><strong>Date:</strong> ${dateStr}</span>
-        </div>
-    </div>
-    
-    <div class="alert">
-        <h3 style="margin:0 0 10px 0; color: ${isNormal ? '#008a4b' : '#f05a28'};">
-            ${isNormal ? 'Screening Complete: No Anomalies Detected' : 'Referral Recommended: Anomalies Detected'}
-        </h3>
-        <p style="margin:0;"><strong>Action:</strong> ${r.action}</p>
-        <p style="margin:5px 0 0 0;"><strong>Anomaly Score:</strong> ${r.anomaly_score.toFixed(4)}</p>
-    </div>
-    
-    ${severitySection}
-    ${heatmapSection}
-    
-    <div class="section">
-        <h2>System Timings</h2>
-        <ul style="margin:0; padding-left: 20px;">
-            <li>Preprocessing: ${r.timings.preprocess_ms} ms</li>
-            <li>Stage 1 (Gate): ${r.timings.stage1_ms} ms</li>
-            ${r.timings.stage2_ms ? `<li>Stage 2 (Classify): ${r.timings.stage2_ms} ms</li>` : ''}
-            <li><strong>Total Time: ${r.timings.total_ms} ms</strong></li>
-        </ul>
-    </div>
-    
-    <div class="footer">
-        Disclaimer: This report is generated by an AI-assisted screening tool. The results, interpretations, and visualizations are for informational purposes only and must be verified by a qualified ophthalmologist. This is not a final medical diagnosis.
-    </div>
-</body>
-</html>`;
-
-            const blob = new Blob([htmlContent], { type: 'text/html' });
-            const url = URL.createObjectURL(blob);
-            
-            const timestamp = new Date().toISOString().replace(/[:T]/g, '-').split('.')[0];
-            const filename = `RetinaAI_Report_${timestamp}.html`;
-            
-            const a = document.createElement('a');
-            a.href = url;
-            a.download = filename;
-            document.body.appendChild(a);
-            a.click();
-            document.body.removeChild(a);
-            URL.revokeObjectURL(url);
+            if (lastResults && lastResults.history_id) {
+                window.location.href = `/api/report/${lastResults.history_id}/pdf`;
+                return;
+            }
+            window.location.href = '/api/report/latest/pdf';
         }
 
         // --- Rest of original scripts for file drop and analysis ---
@@ -1177,6 +1243,153 @@ DASHBOARD_TEMPLATE = r"""<!DOCTYPE html>
             }
         }
 
+        // ══════════════════════════════════════════════════════════
+        // ANIMATED PIPELINE REPLAY — plays after results arrive
+        // ══════════════════════════════════════════════════════════
+        function playPipelineAnimation(res) {
+            // Show the card
+            const card = document.getElementById('pipeline-anim-card');
+            card.classList.remove('hidden');
+
+            const isNormal = res.gate === 'normal_gate';
+            const hasStage2 = !isNormal && res.severity && res.timings.stage2_ms;
+            const rejected  = res.severity && res.severity.rejection && res.severity.rejection.rejected;
+
+            // Reset all steps to dim state
+            for (let i = 0; i <= 5; i++) {
+                const s = document.getElementById('pipe-step-' + i);
+                s.classList.remove('active','done-ok','done-warn','skipped');
+                s.classList.add('opacity-30');
+                const b = document.getElementById('pipe-step-' + i + '-badge');
+                if (b) { b.classList.add('hidden'); }
+            }
+            for (let i = 0; i <= 4; i++) {
+                const a = document.getElementById('pipe-arrow-' + i);
+                if (a) a.classList.remove('lit');
+            }
+            document.getElementById('pipe-total-bar').classList.add('hidden');
+
+            // Helper: activate a step
+            function activate(idx) {
+                const s = document.getElementById('pipe-step-' + idx);
+                s.classList.remove('opacity-30');
+                s.classList.add('active');
+            }
+            // Helper: mark step done
+            function done(idx, state, badgeText, badgeClass) {
+                const s = document.getElementById('pipe-step-' + idx);
+                s.classList.remove('active','opacity-30');
+                s.classList.add(state);       // 'done-ok' | 'done-warn' | 'skipped'
+                const b = document.getElementById('pipe-step-' + idx + '-badge');
+                if (b && badgeText) {
+                    b.textContent = badgeText;
+                    b.className = 'pipe-badge text-xs px-2 py-0.5 rounded-full flex-shrink-0 ' + (badgeClass || 'bg-green-100 text-clinical-green');
+                    b.classList.remove('hidden');
+                }
+                // light up arrow leading away
+                const a = document.getElementById('pipe-arrow-' + idx);
+                if (a) a.classList.add('lit');
+            }
+
+            const D = 520;   // ms between each animation step
+
+            // Step 0 — Image received
+            setTimeout(() => activate(0), 0);
+            setTimeout(() => done(0, 'done-ok', 'Ready', 'bg-green-100 text-clinical-green'), D);
+
+            // Step 1 — Preprocessing
+            setTimeout(() => activate(1), D * 1);
+            setTimeout(() => {
+                const ms = res.timings ? res.timings.preprocess_ms : '—';
+                done(1, 'done-ok', ms + ' ms', 'bg-blue-50 text-clinical-blue');
+            }, D * 2);
+
+            // Step 2 — GANomaly Gate
+            setTimeout(() => activate(2), D * 2);
+            setTimeout(() => {
+                const ms = res.timings ? res.timings.stage1_ms : '—';
+                if (isNormal) {
+                    document.getElementById('pipe-gate-desc').textContent =
+                        'Anomaly score ' + (res.anomaly_score ? res.anomaly_score.toFixed(3) : '—') +
+                        ' ≤ threshold — Retina looks NORMAL. Grading skipped.';
+                    done(2, 'done-ok', ms + ' ms · Normal', 'bg-green-100 text-clinical-green');
+                } else {
+                    document.getElementById('pipe-gate-desc').textContent =
+                        'Anomaly score ' + (res.anomaly_score ? res.anomaly_score.toFixed(3) : '—') +
+                        ' > threshold — Possible disease detected. Sending to grader.';
+                    done(2, 'done-warn', ms + ' ms · Flagged', 'bg-orange-100 text-clinical-orange');
+                }
+            }, D * 3);
+
+            if (isNormal) {
+                // Stage 2 and Grad-CAM were skipped
+                setTimeout(() => {
+                    const s3 = document.getElementById('pipe-step-3');
+                    s3.classList.remove('opacity-30'); s3.classList.add('skipped');
+                    const s4 = document.getElementById('pipe-step-4');
+                    s4.classList.remove('opacity-30'); s4.classList.add('skipped');
+                }, D * 3);
+                setTimeout(() => {
+                    activate(5);
+                    document.getElementById('pipe-final-desc').textContent =
+                        'Healthy retina confirmed. No DR grades required.';
+                }, D * 4);
+                setTimeout(() => {
+                    const b5 = document.getElementById('pipe-step-5-badge');
+                    b5.textContent = 'No DR Detected';
+                    b5.className = 'pipe-badge text-xs px-2 py-0.5 rounded-full font-bold bg-green-100 text-clinical-green';
+                    b5.classList.remove('hidden');
+                    document.getElementById('pipe-step-5').classList.remove('active');
+                    document.getElementById('pipe-step-5').classList.add('done-ok');
+                    if (res.timings) {
+                        document.getElementById('pipe-total-ms').textContent = res.timings.total_ms + ' ms';
+                        document.getElementById('pipe-total-bar').classList.remove('hidden');
+                    }
+                }, D * 5);
+            } else {
+                // Step 3 — EfficientNet-B0 + VBLL Bayesian Grading
+                setTimeout(() => activate(3), D * 3);
+                setTimeout(() => {
+                    const ms = res.timings ? res.timings.stage2_ms : '—';
+                    const conf = res.severity ? res.severity.confidence_pct : '—';
+                    done(3, rejected ? 'done-warn' : 'done-ok',
+                        ms + ' ms · ' + conf + '% conf',
+                        rejected ? 'bg-orange-100 text-clinical-orange' : 'bg-blue-50 text-clinical-blue');
+                }, D * 4);
+
+                // Step 4 — Grad-CAM
+                setTimeout(() => activate(4), D * 4);
+                setTimeout(() => {
+                    const lesion = res.cam_lesion_load != null
+                        ? 'Lesion ' + (res.cam_lesion_load * 100).toFixed(1) + '%'
+                        : 'No heatmap';
+                    done(4, 'done-ok', lesion, 'bg-purple-50 text-purple-700');
+                }, D * 5);
+
+                // Step 5 — Final result
+                setTimeout(() => activate(5), D * 5);
+                setTimeout(() => {
+                    const gradeName = res.severity ? res.severity.grade_name : 'Unknown';
+                    if (rejected) {
+                        document.getElementById('pipe-final-desc').textContent =
+                            'Model uncertain — image flagged for manual ophthalmologist review.';
+                        done(5, 'done-warn', 'Rejected', 'bg-red-100 text-red-600');
+                    } else {
+                        document.getElementById('pipe-final-desc').textContent =
+                            'Diagnosis: ' + gradeName + ' with ' + (res.severity ? res.severity.confidence_pct : '—') + '% confidence.';
+                        done(5, 'done-ok', gradeName, 'bg-green-100 text-clinical-green');
+                    }
+                    if (res.timings) {
+                        document.getElementById('pipe-total-ms').textContent = res.timings.total_ms + ' ms';
+                        document.getElementById('pipe-total-bar').classList.remove('hidden');
+                    }
+                    // Scroll animation card into view
+                    card.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+                }, D * 6);
+            }
+        }
+        // ══════════════════════════════════════════════════════════
+
         function renderResults(res) {
             const content = document.getElementById('results-content');
             content.classList.remove('hidden');
@@ -1184,6 +1397,7 @@ DASHBOARD_TEMPLATE = r"""<!DOCTYPE html>
             
             const isNormal = res.gate === 'normal_gate';
             
+
             setStepperState(1, 'completed');
             if(isNormal) {
                 setStepperState(2, 'completed');
@@ -1281,7 +1495,14 @@ DASHBOARD_TEMPLATE = r"""<!DOCTYPE html>
             setTimeout(() => {
                 content.scrollIntoView({ behavior: 'smooth', block: 'start' });
             }, 100);
+
+            // Play step-by-step pipeline animation after results render
+            setTimeout(() => playPipelineAnimation(res), 600);
+
+            // Automatically refresh history from database so new record is immediately available
+            fetchHistory();
         }
+
         
         function switchView(mode, btn) {
             document.querySelectorAll('.view-btn').forEach(b => b.classList.remove('active'));
@@ -1295,27 +1516,16 @@ DASHBOARD_TEMPLATE = r"""<!DOCTYPE html>
         }
 
         function generateReport() {
-            if(!lastResults) return;
-            // Fake entry mapping to use our combined history generator
-            const dummyHistoryItem = {
-                timestamp: new Date().toISOString(),
-                gate: lastResults.gate,
-                action: lastResults.action,
-                anomaly_score: lastResults.anomaly_score,
-                severity_grade: lastResults.severity ? lastResults.severity.grade : null,
-                severity_name: lastResults.severity ? lastResults.severity.grade_name : null,
-                confidence_pct: lastResults.severity ? lastResults.severity.confidence_pct : null,
-                lesion_load: lastResults.cam_lesion_load,
-                original_b64: uploadedImageB64,
-                heatmap_b64: lastResults.cam_heatmap,
-                full_json: lastResults
-            };
-            
-            // Push dummy to historyData so generator works
-            historyData.push(dummyHistoryItem);
-            generateReportFromHistory(historyData.length - 1);
-            historyData.pop();
+            if(!lastResults) {
+                alert("Please upload an image and run a screening first.");
+                return;
+            }
+            generateReportFromHistory(null);
         }
+
+        // Initialize history on page load
+        fetchHistory();
+        document.addEventListener('DOMContentLoaded', fetchHistory);
     </script>
 </body>
 </html>
@@ -1660,6 +1870,107 @@ def create_app(models_dir, threads):
             })
             
         return jsonify({"success": True, "history": history_list})
+
+    @app.route('/api/report/<history_id>/pdf', methods=['GET'])
+    @login_required
+    def download_report_pdf(history_id):
+        conn = get_db()
+        c = conn.cursor()
+        c.execute('''
+            SELECT 
+                id, patient_id, timestamp, gate, action, anomaly_score, 
+                severity_grade, severity_name, confidence_pct, lesion_load, 
+                blood_sugar_level, diabetes_type, original_b64, heatmap_b64, full_json
+            FROM screening_history
+            WHERE id = ? AND patient_id = ?
+        ''', (history_id, session['patient_id']))
+        row = c.fetchone()
+        conn.close()
+        
+        if not row:
+            return jsonify({"error": "Report not found"}), 404
+            
+        record = {
+            "id": row[0],
+            "patient_id": row[1],
+            "timestamp": row[2],
+            "gate": row[3],
+            "action": row[4],
+            "anomaly_score": row[5],
+            "severity_grade": row[6],
+            "severity_name": row[7],
+            "confidence_pct": row[8],
+            "lesion_load": row[9],
+            "blood_sugar_level": row[10],
+            "diabetes_type": row[11],
+            "original_b64": row[12],
+            "heatmap_b64": row[13],
+            "full_json": json.loads(row[14]) if row[14] else {}
+        }
+        
+        patient_name = session.get('patient_name', 'Patient')
+        pdf_bytes = generate_pdf_report(record, patient_name)
+        
+        ts_clean = str(row[2]).replace(':', '-').replace('T', '_').split('.')[0]
+        filename = f"RetinaAI_Report_{session['patient_id']}_{ts_clean}.pdf"
+        
+        return send_file(
+            io.BytesIO(pdf_bytes),
+            mimetype='application/pdf',
+            as_attachment=True,
+            download_name=filename
+        )
+
+    @app.route('/api/report/latest/pdf', methods=['GET'])
+    @login_required
+    def download_latest_report_pdf():
+        conn = get_db()
+        c = conn.cursor()
+        c.execute('''
+            SELECT 
+                id, patient_id, timestamp, gate, action, anomaly_score, 
+                severity_grade, severity_name, confidence_pct, lesion_load, 
+                blood_sugar_level, diabetes_type, original_b64, heatmap_b64, full_json
+            FROM screening_history
+            WHERE patient_id = ?
+            ORDER BY timestamp DESC LIMIT 1
+        ''', (session['patient_id'],))
+        row = c.fetchone()
+        conn.close()
+        
+        if not row:
+            return jsonify({"error": "No screening report found"}), 404
+            
+        record = {
+            "id": row[0],
+            "patient_id": row[1],
+            "timestamp": row[2],
+            "gate": row[3],
+            "action": row[4],
+            "anomaly_score": row[5],
+            "severity_grade": row[6],
+            "severity_name": row[7],
+            "confidence_pct": row[8],
+            "lesion_load": row[9],
+            "blood_sugar_level": row[10],
+            "diabetes_type": row[11],
+            "original_b64": row[12],
+            "heatmap_b64": row[13],
+            "full_json": json.loads(row[14]) if row[14] else {}
+        }
+        
+        patient_name = session.get('patient_name', 'Patient')
+        pdf_bytes = generate_pdf_report(record, patient_name)
+        
+        ts_clean = str(row[2]).replace(':', '-').replace('T', '_').split('.')[0]
+        filename = f"RetinaAI_Report_{session['patient_id']}_{ts_clean}.pdf"
+        
+        return send_file(
+            io.BytesIO(pdf_bytes),
+            mimetype='application/pdf',
+            as_attachment=True,
+            download_name=filename
+        )
 
     @app.route('/health', methods=['GET'])
     def health():
