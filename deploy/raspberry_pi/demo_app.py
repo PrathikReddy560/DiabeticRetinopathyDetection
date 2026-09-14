@@ -393,44 +393,7 @@ DASHBOARD_TEMPLATE = r"""<!DOCTYPE html>
             to { opacity: 1; transform: translateY(0); }
         }
 
-        /* ── Pipeline Animation Styles ── */
-        .pipe-step.active {
-            opacity: 1 !important;
-            border-color: #005596 !important;
-            background-color: #f0f7ff;
-        }
-        .pipe-step.active .pipe-dot {
-            background-color: #005596 !important;
-            animation: pipe-scan 0.8s ease-in-out infinite alternate;
-        }
-        .pipe-step.active .pipe-dot span {
-            color: white !important;
-        }
-        .pipe-step.done-ok {
-            opacity: 1 !important;
-            border-color: #008a4b !important;
-            background-color: #f0faf5;
-        }
-        .pipe-step.done-ok .pipe-dot {
-            background-color: #008a4b !important;
-        }
-        .pipe-step.done-ok .pipe-dot span { color: white !important; }
-        .pipe-step.done-warn {
-            opacity: 1 !important;
-            border-color: #f05a28 !important;
-            background-color: #fff7f4;
-        }
-        .pipe-step.done-warn .pipe-dot { background-color: #f05a28 !important; }
-        .pipe-step.done-warn .pipe-dot span { color: white !important; }
-        .pipe-step.skipped {
-            opacity: 0.45 !important;
-        }
-        .pipe-arrow.lit { opacity: 1 !important; }
-        .pipe-arrow.lit span { color: #005596; }
-        @keyframes pipe-scan {
-            from { box-shadow: 0 0 0 0 rgba(0,85,150,0.4); }
-            to   { box-shadow: 0 0 0 8px rgba(0,85,150,0); }
-        }
+
         
         .view-btn {
             padding: 0.5rem 1rem;
@@ -709,126 +672,19 @@ DASHBOARD_TEMPLATE = r"""<!DOCTYPE html>
                             </div>
                         </div>
 
-                        <!-- ═══════════════════════════════════════════════ -->
-                        <!-- ANIMATED AI PIPELINE VISUALIZATION             -->
-                        <!-- ═══════════════════════════════════════════════ -->
-                        <div id="pipeline-anim-card" class="hidden bg-white rounded-lg border border-border-color shadow-sm overflow-hidden">
-                            <div class="bg-slate-50 px-4 py-3 border-b border-border-color flex items-center gap-2">
-                                <span class="material-symbols-outlined text-clinical-blue text-[20px]">play_circle</span>
-                                <h3 class="font-semibold text-text-primary text-sm">How Your Image Was Processed</h3>
-                                <span class="ml-auto text-xs text-text-muted italic">AI Pipeline Replay</span>
-                            </div>
-                            <div class="p-4">
-                                <!-- Pipeline steps -->
-                                <div id="pipe-steps" class="space-y-2">
-
-                                    <!-- Step 0: Input -->
-                                    <div id="pipe-step-0" class="pipe-step opacity-30 flex items-center gap-3 p-3 rounded-lg border border-slate-100 transition-all duration-500">
-                                        <div class="pipe-dot w-9 h-9 rounded-full bg-slate-100 flex items-center justify-center flex-shrink-0 transition-all duration-500">
-                                            <span class="material-symbols-outlined text-[18px] text-slate-500">photo_camera</span>
-                                        </div>
-                                        <div class="flex-grow min-w-0">
-                                            <div class="text-xs font-bold text-text-primary">Fundus Image Captured</div>
-                                            <div class="text-xs text-text-muted">Raw retinal photograph received from camera</div>
-                                        </div>
-                                        <div id="pipe-step-0-badge" class="pipe-badge text-xs px-2 py-0.5 rounded-full bg-slate-100 text-slate-500 flex-shrink-0 hidden">Ready</div>
-                                    </div>
-
-                                    <!-- Arrow -->
-                                    <div class="pipe-arrow flex items-center justify-center opacity-20 transition-all duration-500" id="pipe-arrow-0">
-                                        <span class="material-symbols-outlined text-[18px] text-slate-400">arrow_downward</span>
-                                    </div>
-
-                                    <!-- Step 1: Preprocessing -->
-                                    <div id="pipe-step-1" class="pipe-step opacity-30 flex items-center gap-3 p-3 rounded-lg border border-slate-100 transition-all duration-500">
-                                        <div class="pipe-dot w-9 h-9 rounded-full bg-slate-100 flex items-center justify-center flex-shrink-0 transition-all duration-500">
-                                            <span class="material-symbols-outlined text-[18px] text-slate-500">tune</span>
-                                        </div>
-                                        <div class="flex-grow min-w-0">
-                                            <div class="text-xs font-bold text-text-primary">Preprocessing & Enhancement</div>
-                                            <div class="text-xs text-text-muted">Black border crop → CLAHE contrast boost → Resize to 128px & 224px</div>
-                                        </div>
-                                        <div id="pipe-step-1-badge" class="pipe-badge text-xs px-2 py-0.5 rounded-full bg-blue-50 text-clinical-blue flex-shrink-0 hidden" id="badge-preprocess">— ms</div>
-                                    </div>
-
-                                    <!-- Arrow -->
-                                    <div class="pipe-arrow flex items-center justify-center opacity-20 transition-all duration-500" id="pipe-arrow-1">
-                                        <span class="material-symbols-outlined text-[18px] text-slate-400">arrow_downward</span>
-                                    </div>
-
-                                    <!-- Step 2: GANomaly -->
-                                    <div id="pipe-step-2" class="pipe-step opacity-30 flex items-center gap-3 p-3 rounded-lg border border-slate-100 transition-all duration-500">
-                                        <div class="pipe-dot w-9 h-9 rounded-full bg-slate-100 flex items-center justify-center flex-shrink-0 transition-all duration-500">
-                                            <span class="material-symbols-outlined text-[18px] text-slate-500">emergency</span>
-                                        </div>
-                                        <div class="flex-grow min-w-0">
-                                            <div class="text-xs font-bold text-text-primary">Stage 1 — GANomaly Anomaly Gate</div>
-                                            <div class="text-xs text-text-muted" id="pipe-gate-desc">Comparing retina vs. learned healthy patterns to detect any abnormality</div>
-                                        </div>
-                                        <div id="pipe-step-2-badge" class="pipe-badge text-xs px-2 py-0.5 rounded-full bg-blue-50 text-clinical-blue flex-shrink-0 hidden">— ms</div>
-                                    </div>
-
-                                    <!-- Arrow (shown only if Stage 2 ran) -->
-                                    <div class="pipe-arrow flex items-center justify-center opacity-20 transition-all duration-500" id="pipe-arrow-2">
-                                        <span class="material-symbols-outlined text-[18px] text-slate-400">arrow_downward</span>
-                                    </div>
-
-                                    <!-- Step 3: EfficientNet + VBLL -->
-                                    <div id="pipe-step-3" class="pipe-step opacity-30 flex items-center gap-3 p-3 rounded-lg border border-slate-100 transition-all duration-500">
-                                        <div class="pipe-dot w-9 h-9 rounded-full bg-slate-100 flex items-center justify-center flex-shrink-0 transition-all duration-500">
-                                            <span class="material-symbols-outlined text-[18px] text-slate-500">hub</span>
-                                        </div>
-                                        <div class="flex-grow min-w-0">
-                                            <div class="text-xs font-bold text-text-primary">Stage 2 — EfficientNet-B0 + Bayesian Grading</div>
-                                            <div class="text-xs text-text-muted">30 weight samples drawn → probability distribution across 5 DR grades</div>
-                                        </div>
-                                        <div id="pipe-step-3-badge" class="pipe-badge text-xs px-2 py-0.5 rounded-full bg-blue-50 text-clinical-blue flex-shrink-0 hidden">— ms</div>
-                                    </div>
-
-                                    <!-- Arrow -->
-                                    <div class="pipe-arrow flex items-center justify-center opacity-20 transition-all duration-500" id="pipe-arrow-3">
-                                        <span class="material-symbols-outlined text-[18px] text-slate-400">arrow_downward</span>
-                                    </div>
-
-                                    <!-- Step 4: Grad-CAM -->
-                                    <div id="pipe-step-4" class="pipe-step opacity-30 flex items-center gap-3 p-3 rounded-lg border border-slate-100 transition-all duration-500">
-                                        <div class="pipe-dot w-9 h-9 rounded-full bg-slate-100 flex items-center justify-center flex-shrink-0 transition-all duration-500">
-                                            <span class="material-symbols-outlined text-[18px] text-slate-500">visibility</span>
-                                        </div>
-                                        <div class="flex-grow min-w-0">
-                                            <div class="text-xs font-bold text-text-primary">Grad-CAM Explainability Map</div>
-                                            <div class="text-xs text-text-muted">Spatial feature maps × posterior weights → lesion heatmap overlay</div>
-                                        </div>
-                                        <div id="pipe-step-4-badge" class="pipe-badge text-xs px-2 py-0.5 rounded-full hidden">Lesion: —%</div>
-                                    </div>
-
-                                    <!-- Arrow -->
-                                    <div class="pipe-arrow flex items-center justify-center opacity-20 transition-all duration-500" id="pipe-arrow-4">
-                                        <span class="material-symbols-outlined text-[18px] text-slate-400">arrow_downward</span>
-                                    </div>
-
-                                    <!-- Step 5: Final Result -->
-                                    <div id="pipe-step-5" class="pipe-step opacity-30 flex items-center gap-3 p-3 rounded-lg border border-slate-100 transition-all duration-500">
-                                        <div class="pipe-dot w-9 h-9 rounded-full bg-slate-100 flex items-center justify-center flex-shrink-0 transition-all duration-500">
-                                            <span class="material-symbols-outlined text-[18px] text-slate-500">verified</span>
-                                        </div>
-                                        <div class="flex-grow min-w-0">
-                                            <div class="text-xs font-bold text-text-primary">Clinical Decision Ready</div>
-                                            <div class="text-xs text-text-muted" id="pipe-final-desc">Grade determined with uncertainty check and rejection evaluation</div>
-                                        </div>
-                                        <div id="pipe-step-5-badge" class="pipe-badge text-xs px-2 py-0.5 rounded-full hidden font-bold">—</div>
-                                    </div>
-
-                                </div><!-- /pipe-steps -->
-
-                                <!-- Total bar -->
-                                <div id="pipe-total-bar" class="hidden mt-4 pt-3 border-t border-slate-100 flex items-center justify-between text-xs">
-                                    <span class="text-text-muted font-medium">Total Pipeline Time on Raspberry Pi</span>
-                                    <span id="pipe-total-ms" class="font-bold text-clinical-blue text-sm">— ms</span>
+                        <!-- View Pipeline Button (opens separate page) -->
+                        <div id="pipeline-btn-card" class="hidden bg-white rounded-lg border border-border-color shadow-sm overflow-hidden">
+                            <button id="btnViewPipeline" onclick="openPipelinePage()" class="w-full flex items-center gap-3 p-4 hover:bg-slate-50 transition-colors">
+                                <div class="w-10 h-10 rounded-full bg-clinical-blue flex items-center justify-center flex-shrink-0">
+                                    <span class="material-symbols-outlined text-[20px] text-white">play_circle</span>
                                 </div>
-                            </div>
+                                <div class="flex-grow text-left">
+                                    <div class="text-sm font-bold text-text-primary">View How Your Image Was Processed</div>
+                                    <div class="text-xs text-text-muted">Watch an animated step-by-step replay of the AI pipeline</div>
+                                </div>
+                                <span class="material-symbols-outlined text-text-muted">arrow_forward</span>
+                            </button>
                         </div>
-                        <!-- ═══════════════════════════════════════════════ -->
 
                     </div>
 
@@ -1243,152 +1099,6 @@ DASHBOARD_TEMPLATE = r"""<!DOCTYPE html>
             }
         }
 
-        // ══════════════════════════════════════════════════════════
-        // ANIMATED PIPELINE REPLAY — plays after results arrive
-        // ══════════════════════════════════════════════════════════
-        function playPipelineAnimation(res) {
-            // Show the card
-            const card = document.getElementById('pipeline-anim-card');
-            card.classList.remove('hidden');
-
-            const isNormal = res.gate === 'normal_gate';
-            const hasStage2 = !isNormal && res.severity && res.timings.stage2_ms;
-            const rejected  = res.severity && res.severity.rejection && res.severity.rejection.rejected;
-
-            // Reset all steps to dim state
-            for (let i = 0; i <= 5; i++) {
-                const s = document.getElementById('pipe-step-' + i);
-                s.classList.remove('active','done-ok','done-warn','skipped');
-                s.classList.add('opacity-30');
-                const b = document.getElementById('pipe-step-' + i + '-badge');
-                if (b) { b.classList.add('hidden'); }
-            }
-            for (let i = 0; i <= 4; i++) {
-                const a = document.getElementById('pipe-arrow-' + i);
-                if (a) a.classList.remove('lit');
-            }
-            document.getElementById('pipe-total-bar').classList.add('hidden');
-
-            // Helper: activate a step
-            function activate(idx) {
-                const s = document.getElementById('pipe-step-' + idx);
-                s.classList.remove('opacity-30');
-                s.classList.add('active');
-            }
-            // Helper: mark step done
-            function done(idx, state, badgeText, badgeClass) {
-                const s = document.getElementById('pipe-step-' + idx);
-                s.classList.remove('active','opacity-30');
-                s.classList.add(state);       // 'done-ok' | 'done-warn' | 'skipped'
-                const b = document.getElementById('pipe-step-' + idx + '-badge');
-                if (b && badgeText) {
-                    b.textContent = badgeText;
-                    b.className = 'pipe-badge text-xs px-2 py-0.5 rounded-full flex-shrink-0 ' + (badgeClass || 'bg-green-100 text-clinical-green');
-                    b.classList.remove('hidden');
-                }
-                // light up arrow leading away
-                const a = document.getElementById('pipe-arrow-' + idx);
-                if (a) a.classList.add('lit');
-            }
-
-            const D = 520;   // ms between each animation step
-
-            // Step 0 — Image received
-            setTimeout(() => activate(0), 0);
-            setTimeout(() => done(0, 'done-ok', 'Ready', 'bg-green-100 text-clinical-green'), D);
-
-            // Step 1 — Preprocessing
-            setTimeout(() => activate(1), D * 1);
-            setTimeout(() => {
-                const ms = res.timings ? res.timings.preprocess_ms : '—';
-                done(1, 'done-ok', ms + ' ms', 'bg-blue-50 text-clinical-blue');
-            }, D * 2);
-
-            // Step 2 — GANomaly Gate
-            setTimeout(() => activate(2), D * 2);
-            setTimeout(() => {
-                const ms = res.timings ? res.timings.stage1_ms : '—';
-                if (isNormal) {
-                    document.getElementById('pipe-gate-desc').textContent =
-                        'Anomaly score ' + (res.anomaly_score ? res.anomaly_score.toFixed(3) : '—') +
-                        ' ≤ threshold — Retina looks NORMAL. Grading skipped.';
-                    done(2, 'done-ok', ms + ' ms · Normal', 'bg-green-100 text-clinical-green');
-                } else {
-                    document.getElementById('pipe-gate-desc').textContent =
-                        'Anomaly score ' + (res.anomaly_score ? res.anomaly_score.toFixed(3) : '—') +
-                        ' > threshold — Possible disease detected. Sending to grader.';
-                    done(2, 'done-warn', ms + ' ms · Flagged', 'bg-orange-100 text-clinical-orange');
-                }
-            }, D * 3);
-
-            if (isNormal) {
-                // Stage 2 and Grad-CAM were skipped
-                setTimeout(() => {
-                    const s3 = document.getElementById('pipe-step-3');
-                    s3.classList.remove('opacity-30'); s3.classList.add('skipped');
-                    const s4 = document.getElementById('pipe-step-4');
-                    s4.classList.remove('opacity-30'); s4.classList.add('skipped');
-                }, D * 3);
-                setTimeout(() => {
-                    activate(5);
-                    document.getElementById('pipe-final-desc').textContent =
-                        'Healthy retina confirmed. No DR grades required.';
-                }, D * 4);
-                setTimeout(() => {
-                    const b5 = document.getElementById('pipe-step-5-badge');
-                    b5.textContent = 'No DR Detected';
-                    b5.className = 'pipe-badge text-xs px-2 py-0.5 rounded-full font-bold bg-green-100 text-clinical-green';
-                    b5.classList.remove('hidden');
-                    document.getElementById('pipe-step-5').classList.remove('active');
-                    document.getElementById('pipe-step-5').classList.add('done-ok');
-                    if (res.timings) {
-                        document.getElementById('pipe-total-ms').textContent = res.timings.total_ms + ' ms';
-                        document.getElementById('pipe-total-bar').classList.remove('hidden');
-                    }
-                }, D * 5);
-            } else {
-                // Step 3 — EfficientNet-B0 + VBLL Bayesian Grading
-                setTimeout(() => activate(3), D * 3);
-                setTimeout(() => {
-                    const ms = res.timings ? res.timings.stage2_ms : '—';
-                    const conf = res.severity ? res.severity.confidence_pct : '—';
-                    done(3, rejected ? 'done-warn' : 'done-ok',
-                        ms + ' ms · ' + conf + '% conf',
-                        rejected ? 'bg-orange-100 text-clinical-orange' : 'bg-blue-50 text-clinical-blue');
-                }, D * 4);
-
-                // Step 4 — Grad-CAM
-                setTimeout(() => activate(4), D * 4);
-                setTimeout(() => {
-                    const lesion = res.cam_lesion_load != null
-                        ? 'Lesion ' + (res.cam_lesion_load * 100).toFixed(1) + '%'
-                        : 'No heatmap';
-                    done(4, 'done-ok', lesion, 'bg-purple-50 text-purple-700');
-                }, D * 5);
-
-                // Step 5 — Final result
-                setTimeout(() => activate(5), D * 5);
-                setTimeout(() => {
-                    const gradeName = res.severity ? res.severity.grade_name : 'Unknown';
-                    if (rejected) {
-                        document.getElementById('pipe-final-desc').textContent =
-                            'Model uncertain — image flagged for manual ophthalmologist review.';
-                        done(5, 'done-warn', 'Rejected', 'bg-red-100 text-red-600');
-                    } else {
-                        document.getElementById('pipe-final-desc').textContent =
-                            'Diagnosis: ' + gradeName + ' with ' + (res.severity ? res.severity.confidence_pct : '—') + '% confidence.';
-                        done(5, 'done-ok', gradeName, 'bg-green-100 text-clinical-green');
-                    }
-                    if (res.timings) {
-                        document.getElementById('pipe-total-ms').textContent = res.timings.total_ms + ' ms';
-                        document.getElementById('pipe-total-bar').classList.remove('hidden');
-                    }
-                    // Scroll animation card into view
-                    card.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
-                }, D * 6);
-            }
-        }
-        // ══════════════════════════════════════════════════════════
 
         function renderResults(res) {
             const content = document.getElementById('results-content');
@@ -1496,11 +1206,21 @@ DASHBOARD_TEMPLATE = r"""<!DOCTYPE html>
                 content.scrollIntoView({ behavior: 'smooth', block: 'start' });
             }, 100);
 
-            // Play step-by-step pipeline animation after results render
-            setTimeout(() => playPipelineAnimation(res), 600);
+            // Save results + uploaded image to sessionStorage for the pipeline page
+            sessionStorage.setItem('pipelineResults', JSON.stringify(res));
+            sessionStorage.setItem('pipelineImage', uploadedImageB64 || '');
+            if (res.cam_heatmap) {
+                sessionStorage.setItem('pipelineHeatmap', 'data:image/png;base64,' + res.cam_heatmap);
+            }
+            // Show the "View Pipeline" button
+            document.getElementById('pipeline-btn-card').classList.remove('hidden');
 
             // Automatically refresh history from database so new record is immediately available
             fetchHistory();
+        }
+
+        function openPipelinePage() {
+            window.open('/pipeline', '_blank');
         }
 
         
@@ -1526,6 +1246,374 @@ DASHBOARD_TEMPLATE = r"""<!DOCTYPE html>
         // Initialize history on page load
         fetchHistory();
         document.addEventListener('DOMContentLoaded', fetchHistory);
+    </script>
+</body>
+</html>
+"""
+
+# ══════════════════════════════════════════════════════════════════════
+# PIPELINE TEMPLATE — Dedicated animated AI pipeline visualization page
+# ══════════════════════════════════════════════════════════════════════
+PIPELINE_TEMPLATE = r"""<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>RetinaAI — How Your Image Was Processed</title>
+    <link href="/static/css/ibm-plex-sans.css" rel="stylesheet">
+    <link href="/static/css/material-symbols.css" rel="stylesheet" />
+    <script src="/static/js/tailwind.js"></script>
+    <script>
+        tailwind.config = {
+            theme: {
+                extend: {
+                    colors: {
+                        'clinical-blue': '#005596',
+                        'clinical-green': '#008a4b',
+                        'clinical-orange': '#f05a28',
+                        'bg-light': '#f8fafc',
+                        'text-primary': '#1e293b',
+                        'text-muted': '#64748b',
+                        'border-color': '#e2e8f0'
+                    },
+                    fontFamily: { sans: ['IBM Plex Sans', 'sans-serif'] }
+                }
+            }
+        }
+    </script>
+    <style>
+        body { font-family: 'IBM Plex Sans', sans-serif; background-color: #f8fafc; color: #1e293b; }
+        .pipe-step.active { opacity: 1 !important; border-color: #005596 !important; background-color: #f0f7ff; }
+        .pipe-step.active .pipe-dot { background-color: #005596 !important; animation: pipe-scan 0.8s ease-in-out infinite alternate; }
+        .pipe-step.active .pipe-dot span { color: white !important; }
+        .pipe-step.done-ok { opacity: 1 !important; border-color: #008a4b !important; background-color: #f0faf5; }
+        .pipe-step.done-ok .pipe-dot { background-color: #008a4b !important; }
+        .pipe-step.done-ok .pipe-dot span { color: white !important; }
+        .pipe-step.done-warn { opacity: 1 !important; border-color: #f05a28 !important; background-color: #fff7f4; }
+        .pipe-step.done-warn .pipe-dot { background-color: #f05a28 !important; }
+        .pipe-step.done-warn .pipe-dot span { color: white !important; }
+        .pipe-step.skipped { opacity: 0.45 !important; }
+        .pipe-arrow.lit { opacity: 1 !important; }
+        .pipe-arrow.lit span { color: #005596; }
+        @keyframes pipe-scan { from { box-shadow: 0 0 0 0 rgba(0,85,150,0.4); } to { box-shadow: 0 0 0 8px rgba(0,85,150,0); } }
+        @keyframes fadeSlideUp { from { opacity: 0; transform: translateY(12px); } to { opacity: 1; transform: translateY(0); } }
+        .fade-slide { animation: fadeSlideUp 0.5s ease-out both; }
+    </style>
+</head>
+<body class="min-h-screen bg-bg-light">
+
+    <!-- Header -->
+    <header class="bg-white border-b border-border-color shadow-sm">
+        <div class="max-w-5xl mx-auto px-4 py-4 flex items-center justify-between">
+            <div class="flex items-center gap-3">
+                <div class="w-10 h-10 rounded-xl bg-clinical-blue flex items-center justify-center">
+                    <span class="material-symbols-outlined text-white text-[22px]">visibility</span>
+                </div>
+                <div>
+                    <h1 class="text-lg font-bold text-text-primary">RetinaAI Pipeline Visualization</h1>
+                    <p class="text-xs text-text-muted">Step-by-step replay of how the AI processed your fundus image</p>
+                </div>
+            </div>
+            <div class="flex gap-2">
+                <button onclick="replayAnimation()" class="bg-clinical-blue text-white px-4 py-2 rounded-lg text-sm font-medium hover:bg-blue-800 transition-colors flex items-center gap-2">
+                    <span class="material-symbols-outlined text-[18px]">replay</span> Replay
+                </button>
+                <a href="/dashboard" class="border border-border-color text-text-primary px-4 py-2 rounded-lg text-sm font-medium hover:bg-slate-50 transition-colors flex items-center gap-2">
+                    <span class="material-symbols-outlined text-[18px]">arrow_back</span> Back
+                </a>
+            </div>
+        </div>
+    </header>
+
+    <main class="max-w-5xl mx-auto p-4 sm:p-6 space-y-6">
+
+        <!-- Images Row: Original + Grad-CAM -->
+        <div id="images-row" class="grid grid-cols-1 md:grid-cols-2 gap-4 fade-slide">
+            <!-- Original Input Image -->
+            <div class="bg-white rounded-lg border border-border-color shadow-sm overflow-hidden">
+                <div class="bg-slate-50 px-4 py-3 border-b border-border-color flex items-center gap-2">
+                    <span class="material-symbols-outlined text-text-muted text-[20px]">photo_camera</span>
+                    <h3 class="font-semibold text-text-primary text-sm">Input Fundus Image</h3>
+                </div>
+                <div class="p-4 flex items-center justify-center">
+                    <img id="pipe-input-img" src="" alt="Input fundus" class="max-h-64 rounded-lg border border-slate-200 object-contain">
+                </div>
+            </div>
+            <!-- Grad-CAM Heatmap -->
+            <div id="heatmap-panel" class="bg-white rounded-lg border border-border-color shadow-sm overflow-hidden">
+                <div class="bg-slate-50 px-4 py-3 border-b border-border-color flex items-center gap-2">
+                    <span class="material-symbols-outlined text-text-muted text-[20px]">thermostat</span>
+                    <h3 class="font-semibold text-text-primary text-sm">Grad-CAM Heatmap Overlay</h3>
+                </div>
+                <div class="p-4 flex items-center justify-center">
+                    <img id="pipe-heatmap-img" src="" alt="Grad-CAM heatmap" class="max-h-64 rounded-lg border border-slate-200 object-contain">
+                </div>
+            </div>
+        </div>
+
+        <!-- Pipeline Animation Card -->
+        <div class="bg-white rounded-lg border border-border-color shadow-sm overflow-hidden fade-slide" style="animation-delay: 0.15s">
+            <div class="bg-slate-50 px-4 py-3 border-b border-border-color flex items-center gap-2">
+                <span class="material-symbols-outlined text-clinical-blue text-[20px]">play_circle</span>
+                <h3 class="font-semibold text-text-primary text-sm">AI Processing Pipeline</h3>
+                <span class="ml-auto text-xs text-text-muted italic" id="pipe-status-label">Starting...</span>
+            </div>
+            <div class="p-5">
+                <div id="pipe-steps" class="space-y-3">
+
+                    <!-- Step 0 -->
+                    <div id="pipe-step-0" class="pipe-step opacity-30 flex items-center gap-4 p-4 rounded-xl border border-slate-100 transition-all duration-500">
+                        <div class="pipe-dot w-11 h-11 rounded-full bg-slate-100 flex items-center justify-center flex-shrink-0 transition-all duration-500">
+                            <span class="material-symbols-outlined text-[22px] text-slate-500">photo_camera</span>
+                        </div>
+                        <div class="flex-grow">
+                            <div class="text-sm font-bold text-text-primary">Step 1 — Fundus Image Captured</div>
+                            <div class="text-xs text-text-muted mt-0.5">Raw retinal photograph received from the camera or uploaded file</div>
+                        </div>
+                        <div id="pipe-step-0-badge" class="text-xs px-3 py-1 rounded-full bg-slate-100 text-slate-500 flex-shrink-0 hidden">Ready</div>
+                    </div>
+                    <div class="pipe-arrow flex justify-center opacity-20 transition-all duration-500" id="pipe-arrow-0">
+                        <span class="material-symbols-outlined text-[20px] text-slate-400">arrow_downward</span>
+                    </div>
+
+                    <!-- Step 1 -->
+                    <div id="pipe-step-1" class="pipe-step opacity-30 flex items-center gap-4 p-4 rounded-xl border border-slate-100 transition-all duration-500">
+                        <div class="pipe-dot w-11 h-11 rounded-full bg-slate-100 flex items-center justify-center flex-shrink-0 transition-all duration-500">
+                            <span class="material-symbols-outlined text-[22px] text-slate-500">tune</span>
+                        </div>
+                        <div class="flex-grow">
+                            <div class="text-sm font-bold text-text-primary">Step 2 — Preprocessing & CLAHE Enhancement</div>
+                            <div class="text-xs text-text-muted mt-0.5">Black border crop → Square padding → L-channel CLAHE contrast equalization → Resize to 128×128 (Gate) and 224×224 (Classifier)</div>
+                        </div>
+                        <div id="pipe-step-1-badge" class="text-xs px-3 py-1 rounded-full bg-blue-50 text-clinical-blue flex-shrink-0 hidden">— ms</div>
+                    </div>
+                    <div class="pipe-arrow flex justify-center opacity-20 transition-all duration-500" id="pipe-arrow-1">
+                        <span class="material-symbols-outlined text-[20px] text-slate-400">arrow_downward</span>
+                    </div>
+
+                    <!-- Step 2 -->
+                    <div id="pipe-step-2" class="pipe-step opacity-30 flex items-center gap-4 p-4 rounded-xl border border-slate-100 transition-all duration-500">
+                        <div class="pipe-dot w-11 h-11 rounded-full bg-slate-100 flex items-center justify-center flex-shrink-0 transition-all duration-500">
+                            <span class="material-symbols-outlined text-[22px] text-slate-500">emergency</span>
+                        </div>
+                        <div class="flex-grow">
+                            <div class="text-sm font-bold text-text-primary">Step 3 — GANomaly Anomaly Detection Gate</div>
+                            <div class="text-xs text-text-muted mt-0.5" id="pipe-gate-desc">Encoder→Decoder→Encoder: reconstructs the image and compares latent codes. High reconstruction error = abnormal retina.</div>
+                        </div>
+                        <div id="pipe-step-2-badge" class="text-xs px-3 py-1 rounded-full bg-blue-50 text-clinical-blue flex-shrink-0 hidden">— ms</div>
+                    </div>
+                    <div class="pipe-arrow flex justify-center opacity-20 transition-all duration-500" id="pipe-arrow-2">
+                        <span class="material-symbols-outlined text-[20px] text-slate-400">arrow_downward</span>
+                    </div>
+
+                    <!-- Step 3 -->
+                    <div id="pipe-step-3" class="pipe-step opacity-30 flex items-center gap-4 p-4 rounded-xl border border-slate-100 transition-all duration-500">
+                        <div class="pipe-dot w-11 h-11 rounded-full bg-slate-100 flex items-center justify-center flex-shrink-0 transition-all duration-500">
+                            <span class="material-symbols-outlined text-[22px] text-slate-500">hub</span>
+                        </div>
+                        <div class="flex-grow">
+                            <div class="text-sm font-bold text-text-primary">Step 4 — EfficientNet-B0 + Variational Bayesian Last Layer</div>
+                            <div class="text-xs text-text-muted mt-0.5">Extracts 1280-dimensional features → 30 posterior weight samples drawn from learned Gaussian → Softmax averaged → Grade 0–4 probability distribution with epistemic uncertainty</div>
+                        </div>
+                        <div id="pipe-step-3-badge" class="text-xs px-3 py-1 rounded-full bg-blue-50 text-clinical-blue flex-shrink-0 hidden">— ms</div>
+                    </div>
+                    <div class="pipe-arrow flex justify-center opacity-20 transition-all duration-500" id="pipe-arrow-3">
+                        <span class="material-symbols-outlined text-[20px] text-slate-400">arrow_downward</span>
+                    </div>
+
+                    <!-- Step 4 -->
+                    <div id="pipe-step-4" class="pipe-step opacity-30 flex items-center gap-4 p-4 rounded-xl border border-slate-100 transition-all duration-500">
+                        <div class="pipe-dot w-11 h-11 rounded-full bg-slate-100 flex items-center justify-center flex-shrink-0 transition-all duration-500">
+                            <span class="material-symbols-outlined text-[22px] text-slate-500">visibility</span>
+                        </div>
+                        <div class="flex-grow">
+                            <div class="text-sm font-bold text-text-primary">Step 5 — Grad-CAM Explainability Heatmap</div>
+                            <div class="text-xs text-text-muted mt-0.5">Final conv features (1280×7×7) × posterior mean weights → ReLU → Bicubic upscale to 224×224 → JET colormap overlay highlighting lesion locations</div>
+                        </div>
+                        <div id="pipe-step-4-badge" class="text-xs px-3 py-1 rounded-full hidden">Lesion: —%</div>
+                    </div>
+                    <div class="pipe-arrow flex justify-center opacity-20 transition-all duration-500" id="pipe-arrow-4">
+                        <span class="material-symbols-outlined text-[20px] text-slate-400">arrow_downward</span>
+                    </div>
+
+                    <!-- Step 5 -->
+                    <div id="pipe-step-5" class="pipe-step opacity-30 flex items-center gap-4 p-4 rounded-xl border border-slate-100 transition-all duration-500">
+                        <div class="pipe-dot w-11 h-11 rounded-full bg-slate-100 flex items-center justify-center flex-shrink-0 transition-all duration-500">
+                            <span class="material-symbols-outlined text-[22px] text-slate-500">verified</span>
+                        </div>
+                        <div class="flex-grow">
+                            <div class="text-sm font-bold text-text-primary">Step 6 — Clinical Decision & Uncertainty Check</div>
+                            <div class="text-xs text-text-muted mt-0.5" id="pipe-final-desc">Multi-criteria rejection check (MSP, Entropy, Top-2 Gap) → Final DR grade assigned or image rejected for specialist review</div>
+                        </div>
+                        <div id="pipe-step-5-badge" class="text-xs px-3 py-1 rounded-full hidden font-bold">—</div>
+                    </div>
+
+                </div>
+
+                <!-- Total bar -->
+                <div id="pipe-total-bar" class="hidden mt-5 pt-4 border-t border-slate-200 flex items-center justify-between">
+                    <span class="text-sm text-text-muted font-medium">Total Pipeline Execution Time on Raspberry Pi 4</span>
+                    <span id="pipe-total-ms" class="font-bold text-clinical-blue text-lg">— ms</span>
+                </div>
+            </div>
+        </div>
+
+        <!-- Footer Disclaimer -->
+        <div class="text-center text-xs text-text-muted py-4">
+            RetinaAI — Edge-Deployable Diabetic Retinopathy Screening System · All processing runs 100% offline on Raspberry Pi
+        </div>
+
+    </main>
+
+    <script>
+        const res = JSON.parse(sessionStorage.getItem('pipelineResults') || 'null');
+        const inputImg = sessionStorage.getItem('pipelineImage') || '';
+        const heatmapImg = sessionStorage.getItem('pipelineHeatmap') || '';
+
+        if (!res) {
+            document.querySelector('main').innerHTML = '<div class="text-center py-20"><p class="text-lg text-text-muted">No screening data available.</p><p class="text-sm text-text-muted mt-2">Please run a screening first, then click "View How Your Image Was Processed".</p><a href="/dashboard" class="mt-4 inline-block bg-clinical-blue text-white px-6 py-2 rounded-lg">Go to Dashboard</a></div>';
+        } else {
+            // Set images
+            if (inputImg) {
+                document.getElementById('pipe-input-img').src = inputImg;
+            }
+            if (heatmapImg) {
+                document.getElementById('pipe-heatmap-img').src = heatmapImg;
+            } else {
+                document.getElementById('heatmap-panel').classList.add('hidden');
+            }
+
+            // Play animation on load
+            setTimeout(() => playAnimation(res), 400);
+        }
+
+        function replayAnimation() {
+            if (res) playAnimation(res);
+        }
+
+        function playAnimation(res) {
+            const isNormal = res.gate === 'normal_gate';
+            const rejected = res.severity && res.severity.rejection && res.severity.rejection.rejected;
+            const statusLabel = document.getElementById('pipe-status-label');
+            statusLabel.textContent = 'Replaying...';
+
+            // Reset all
+            for (let i = 0; i <= 5; i++) {
+                const s = document.getElementById('pipe-step-' + i);
+                s.classList.remove('active','done-ok','done-warn','skipped');
+                s.classList.add('opacity-30');
+                const b = document.getElementById('pipe-step-' + i + '-badge');
+                if (b) b.classList.add('hidden');
+            }
+            for (let i = 0; i <= 4; i++) {
+                const a = document.getElementById('pipe-arrow-' + i);
+                if (a) a.classList.remove('lit');
+            }
+            document.getElementById('pipe-total-bar').classList.add('hidden');
+
+            function activate(idx) {
+                const s = document.getElementById('pipe-step-' + idx);
+                s.classList.remove('opacity-30');
+                s.classList.add('active');
+                s.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+            }
+            function done(idx, state, badgeText, badgeClass) {
+                const s = document.getElementById('pipe-step-' + idx);
+                s.classList.remove('active','opacity-30');
+                s.classList.add(state);
+                const b = document.getElementById('pipe-step-' + idx + '-badge');
+                if (b && badgeText) {
+                    b.textContent = badgeText;
+                    b.className = 'text-xs px-3 py-1 rounded-full flex-shrink-0 ' + (badgeClass || 'bg-green-100 text-clinical-green');
+                    b.classList.remove('hidden');
+                }
+                const a = document.getElementById('pipe-arrow-' + idx);
+                if (a) a.classList.add('lit');
+            }
+
+            const D = 650;
+
+            setTimeout(() => activate(0), 0);
+            setTimeout(() => done(0, 'done-ok', 'Received', 'bg-green-100 text-clinical-green'), D);
+
+            setTimeout(() => activate(1), D);
+            setTimeout(() => {
+                done(1, 'done-ok', (res.timings ? res.timings.preprocess_ms : '—') + ' ms', 'bg-blue-50 text-clinical-blue');
+            }, D * 2);
+
+            setTimeout(() => activate(2), D * 2);
+            setTimeout(() => {
+                const ms = res.timings ? res.timings.stage1_ms : '—';
+                if (isNormal) {
+                    document.getElementById('pipe-gate-desc').textContent =
+                        'Anomaly score: ' + (res.anomaly_score ? res.anomaly_score.toFixed(4) : '—') +
+                        ' — below threshold (0.6282). Retina appears HEALTHY. Stage 2 skipped.';
+                    done(2, 'done-ok', ms + ' ms — Normal', 'bg-green-100 text-clinical-green');
+                } else {
+                    document.getElementById('pipe-gate-desc').textContent =
+                        'Anomaly score: ' + (res.anomaly_score ? res.anomaly_score.toFixed(4) : '—') +
+                        ' — above threshold (0.6282). Possible disease detected! Routing to Stage 2 classifier.';
+                    done(2, 'done-warn', ms + ' ms — Flagged', 'bg-orange-100 text-clinical-orange');
+                }
+            }, D * 3);
+
+            if (isNormal) {
+                setTimeout(() => {
+                    document.getElementById('pipe-step-3').classList.remove('opacity-30');
+                    document.getElementById('pipe-step-3').classList.add('skipped');
+                    document.getElementById('pipe-step-4').classList.remove('opacity-30');
+                    document.getElementById('pipe-step-4').classList.add('skipped');
+                }, D * 3);
+                setTimeout(() => {
+                    activate(5);
+                    document.getElementById('pipe-final-desc').textContent = 'Healthy retina confirmed. No DR grading required. Patient cleared.';
+                }, D * 4);
+                setTimeout(() => {
+                    done(5, 'done-ok', 'No DR Detected', 'bg-green-100 text-clinical-green font-bold');
+                    if (res.timings) {
+                        document.getElementById('pipe-total-ms').textContent = res.timings.total_ms + ' ms';
+                        document.getElementById('pipe-total-bar').classList.remove('hidden');
+                    }
+                    statusLabel.textContent = 'Complete ✓';
+                }, D * 5);
+            } else {
+                setTimeout(() => activate(3), D * 3);
+                setTimeout(() => {
+                    const ms = res.timings ? res.timings.stage2_ms : '—';
+                    const conf = res.severity ? res.severity.confidence_pct : '—';
+                    done(3, rejected ? 'done-warn' : 'done-ok',
+                        ms + ' ms — ' + conf + '% confidence',
+                        rejected ? 'bg-orange-100 text-clinical-orange' : 'bg-blue-50 text-clinical-blue');
+                }, D * 4);
+
+                setTimeout(() => activate(4), D * 4);
+                setTimeout(() => {
+                    const lesion = res.cam_lesion_load != null
+                        ? 'Lesion Load: ' + (res.cam_lesion_load * 100).toFixed(1) + '%'
+                        : 'No heatmap generated';
+                    done(4, 'done-ok', lesion, 'bg-purple-50 text-purple-700');
+                }, D * 5);
+
+                setTimeout(() => activate(5), D * 5);
+                setTimeout(() => {
+                    const gradeName = res.severity ? res.severity.grade_name : 'Unknown';
+                    if (rejected) {
+                        document.getElementById('pipe-final-desc').textContent =
+                            'Model is uncertain about this image. Automatically flagged for manual specialist ophthalmologist review.';
+                        done(5, 'done-warn', 'REJECTED — Manual Review', 'bg-red-100 text-red-600 font-bold');
+                    } else {
+                        document.getElementById('pipe-final-desc').textContent =
+                            'Diagnosis: ' + gradeName + ' with ' + (res.severity ? res.severity.confidence_pct : '—') + '% confidence. Uncertainty check passed.';
+                        done(5, 'done-ok', gradeName, 'bg-green-100 text-clinical-green font-bold');
+                    }
+                    if (res.timings) {
+                        document.getElementById('pipe-total-ms').textContent = res.timings.total_ms + ' ms';
+                        document.getElementById('pipe-total-bar').classList.remove('hidden');
+                    }
+                    statusLabel.textContent = 'Complete ✓';
+                }, D * 6);
+            }
+        }
     </script>
 </body>
 </html>
@@ -1703,6 +1791,11 @@ def create_app(models_dir, threads):
             patient_id=session.get('patient_id'),
             patient_email=session.get('patient_email')
         )
+
+    @app.route('/pipeline', methods=['GET'])
+    @login_required
+    def pipeline():
+        return render_template_string(PIPELINE_TEMPLATE)
 
     @app.route('/api/analyze', methods=['POST'])
     @login_required
