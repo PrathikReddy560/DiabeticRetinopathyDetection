@@ -994,6 +994,11 @@ DASHBOARD_TEMPLATE = r"""<!DOCTYPE html>
                     document.getElementById('filenameDisplay').textContent = file.name;
                     document.getElementById('filesizeDisplay').textContent = (file.size / (1024*1024)).toFixed(2) + ' MB';
                     document.getElementById('btnSubmit').disabled = false;
+
+                    // Persist to sessionStorage for restoration on return
+                    sessionStorage.setItem('pipelineImage', uploadedImageB64);
+                    sessionStorage.setItem('pipelineFileName', file.name);
+                    sessionStorage.setItem('pipelineFileSize', (file.size / (1024*1024)).toFixed(2) + ' MB');
                 }
                 reader.readAsDataURL(file);
             }
@@ -1100,7 +1105,7 @@ DASHBOARD_TEMPLATE = r"""<!DOCTYPE html>
         }
 
 
-        function renderResults(res) {
+        function renderResults(res, isRestoring = false) {
             const content = document.getElementById('results-content');
             content.classList.remove('hidden');
             document.getElementById('btnDownloadReport').classList.remove('hidden');
@@ -1202,13 +1207,19 @@ DASHBOARD_TEMPLATE = r"""<!DOCTYPE html>
                 visCol.classList.add('hidden');
             }
             
-            setTimeout(() => {
-                content.scrollIntoView({ behavior: 'smooth', block: 'start' });
-            }, 100);
+            if (!isRestoring) {
+                setTimeout(() => {
+                    content.scrollIntoView({ behavior: 'smooth', block: 'start' });
+                }, 100);
+            }
 
-            // Save results + uploaded image to sessionStorage for the pipeline page
+            // Save results + uploaded image to sessionStorage for the pipeline page and restoration
             sessionStorage.setItem('pipelineResults', JSON.stringify(res));
             sessionStorage.setItem('pipelineImage', uploadedImageB64 || '');
+            const fnameEl = document.getElementById('filenameDisplay');
+            const fsizeEl = document.getElementById('filesizeDisplay');
+            if (fnameEl && fnameEl.textContent) sessionStorage.setItem('pipelineFileName', fnameEl.textContent);
+            if (fsizeEl && fsizeEl.textContent) sessionStorage.setItem('pipelineFileSize', fsizeEl.textContent);
             if (res.cam_heatmap) {
                 sessionStorage.setItem('pipelineHeatmap', 'data:image/png;base64,' + res.cam_heatmap);
             }
@@ -1216,14 +1227,15 @@ DASHBOARD_TEMPLATE = r"""<!DOCTYPE html>
             document.getElementById('pipeline-btn-card').classList.remove('hidden');
 
             // Automatically refresh history from database so new record is immediately available
-            fetchHistory();
+            if (!isRestoring) {
+                fetchHistory();
+            }
         }
 
         function openPipelinePage() {
-            window.open('/pipeline', '_blank');
+            window.location.href = '/pipeline';
         }
 
-        
         function switchView(mode, btn) {
             document.querySelectorAll('.view-btn').forEach(b => b.classList.remove('active'));
             btn.classList.add('active');
@@ -1243,9 +1255,56 @@ DASHBOARD_TEMPLATE = r"""<!DOCTYPE html>
             generateReportFromHistory(null);
         }
 
-        // Initialize history on page load
-        fetchHistory();
-        document.addEventListener('DOMContentLoaded', fetchHistory);
+        // Restore previous input and diagnosis results when returning from the animation page
+        function restorePreviousState() {
+            const savedImg = sessionStorage.getItem('pipelineImage');
+            const savedResultsStr = sessionStorage.getItem('pipelineResults');
+            
+            if (savedImg) {
+                uploadedImageB64 = savedImg;
+                const promptEl = document.getElementById('uploadPrompt');
+                const prevCont = document.getElementById('imagePreviewContainer');
+                const prevImg = document.getElementById('imagePreview');
+                const fnameEl = document.getElementById('filenameDisplay');
+                const fsizeEl = document.getElementById('filesizeDisplay');
+                const btn = document.getElementById('btnSubmit');
+                
+                if (promptEl) promptEl.classList.add('hidden');
+                if (prevCont) prevCont.classList.remove('hidden');
+                if (prevImg) prevImg.src = savedImg;
+                if (fnameEl) fnameEl.textContent = sessionStorage.getItem('pipelineFileName') || 'fundus_image.jpg';
+                if (fsizeEl) fsizeEl.textContent = sessionStorage.getItem('pipelineFileSize') || '';
+                if (btn) btn.disabled = false;
+            }
+            
+            if (savedResultsStr) {
+                try {
+                    const savedResults = JSON.parse(savedResultsStr);
+                    lastResults = savedResults;
+                    const placeholder = document.getElementById('results-placeholder');
+                    const stepper = document.getElementById('stepper-container');
+                    if (placeholder) placeholder.classList.add('hidden');
+                    if (stepper) stepper.classList.remove('hidden');
+                    
+                    renderResults(savedResults, true);
+                } catch(e) {
+                    console.error("Error restoring previous screening results:", e);
+                }
+            }
+        }
+
+        // Initialize state on page load and on back navigation (pageshow / bfcache)
+        function initPage() {
+            fetchHistory();
+            restorePreviousState();
+        }
+
+        if (document.readyState === 'loading') {
+            document.addEventListener('DOMContentLoaded', initPage);
+        } else {
+            initPage();
+        }
+        window.addEventListener('pageshow', restorePreviousState);
     </script>
 </body>
 </html>
@@ -1318,9 +1377,9 @@ PIPELINE_TEMPLATE = r"""<!DOCTYPE html>
                 <button onclick="replayAnimation()" class="bg-clinical-blue text-white px-4 py-2 rounded-lg text-sm font-medium hover:bg-blue-800 transition-colors flex items-center gap-2">
                     <span class="material-symbols-outlined text-[18px]">replay</span> Replay
                 </button>
-                <a href="/dashboard" class="border border-border-color text-text-primary px-4 py-2 rounded-lg text-sm font-medium hover:bg-slate-50 transition-colors flex items-center gap-2">
+                <button onclick="goBackToDashboard()" class="border border-border-color text-text-primary px-4 py-2 rounded-lg text-sm font-medium hover:bg-slate-50 transition-colors flex items-center gap-2 cursor-pointer">
                     <span class="material-symbols-outlined text-[18px]">arrow_back</span> Back
-                </a>
+                </button>
             </div>
         </div>
     </header>
@@ -1485,6 +1544,14 @@ PIPELINE_TEMPLATE = r"""<!DOCTYPE html>
 
             // Play animation on load
             setTimeout(() => playAnimation(res), 400);
+        }
+
+        function goBackToDashboard() {
+            if (window.history.length > 1) {
+                window.history.back();
+            } else {
+                window.location.href = '/dashboard';
+            }
         }
 
         function replayAnimation() {
