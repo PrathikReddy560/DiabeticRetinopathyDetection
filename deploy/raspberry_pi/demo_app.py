@@ -13,7 +13,10 @@ from pathlib import Path
 from flask import Flask, jsonify, redirect, render_template_string, request, session, url_for, send_file
 from functools import wraps
 from inference import DRPipeline
-from report_generator import generate_pdf_report
+try:
+    from report_generator import generate_pdf_report
+except ImportError:
+    generate_pdf_report = None
 
 AUTH_TEMPLATE = r"""<!DOCTYPE html>
 <html lang="en">
@@ -2069,6 +2072,8 @@ def create_app(models_dir, threads):
         }
         
         patient_name = session.get('patient_name', 'Patient')
+        if generate_pdf_report is None:
+            return jsonify({"error": "PDF generation library is not installed on this device."}), 501
         pdf_bytes = generate_pdf_report(record, patient_name)
         
         ts_clean = str(row[2]).replace(':', '-').replace('T', '_').split('.')[0]
@@ -2120,6 +2125,8 @@ def create_app(models_dir, threads):
         }
         
         patient_name = session.get('patient_name', 'Patient')
+        if generate_pdf_report is None:
+            return jsonify({"error": "PDF generation library is not installed on this device."}), 501
         pdf_bytes = generate_pdf_report(record, patient_name)
         
         ts_clean = str(row[2]).replace(':', '-').replace('T', '_').split('.')[0]
