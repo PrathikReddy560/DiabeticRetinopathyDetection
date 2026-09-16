@@ -873,6 +873,110 @@ DASHBOARD_TEMPLATE = r"""<!DOCTYPE html>
                 </div>
             </div>
 
+            <!-- AI Longitudinal Recommendations & Care Plan Card -->
+            <div id="hist-ai-recommendations" class="hidden bg-white rounded-lg border border-border-color shadow-sm overflow-hidden fade-in">
+                <div class="bg-slate-50 px-5 py-4 border-b border-border-color flex flex-col sm:flex-row sm:items-center justify-between gap-2">
+                    <div class="flex items-center gap-3">
+                        <div class="w-10 h-10 rounded-xl bg-clinical-blue/10 flex items-center justify-center flex-shrink-0">
+                            <span class="material-symbols-outlined text-clinical-blue text-[22px]">assistant</span>
+                        </div>
+                        <div>
+                            <h3 class="font-bold text-text-primary text-base">AI Longitudinal Care Plan & Recommendations</h3>
+                            <p class="text-xs text-text-muted">Synthesizing all your past screenings into an actionable clinical next-step plan</p>
+                        </div>
+                    </div>
+                    <span id="hist-plan-badge" class="self-start sm:self-auto px-3 py-1 rounded-full text-xs font-bold bg-blue-50 text-clinical-blue border border-blue-200">
+                        Active Care Plan
+                    </span>
+                </div>
+
+                <div class="p-5 sm:p-6 space-y-6">
+                    <!-- Screening Journey Summary Box -->
+                    <div id="hist-journey-box" class="p-4 rounded-xl border border-slate-200 bg-slate-50 flex flex-col md:flex-row items-start md:items-center justify-between gap-4">
+                        <div class="space-y-1">
+                            <div class="flex items-center gap-2">
+                                <span class="material-symbols-outlined text-clinical-blue text-[18px]">history_edu</span>
+                                <p class="text-xs font-bold text-text-muted uppercase tracking-wider">Screening Journey Overview</p>
+                            </div>
+                            <p id="hist-journey-title" class="text-sm font-bold text-text-primary"></p>
+                            <p id="hist-journey-desc" class="text-xs text-text-muted leading-relaxed"></p>
+                        </div>
+                        <div id="hist-status-pill" class="flex-shrink-0 px-4 py-2 rounded-xl text-center font-bold text-xs">
+                        </div>
+                    </div>
+
+                    <!-- 2-Column: Next Step & Action Plan + Trajectory -->
+                    <div class="grid grid-cols-1 md:grid-cols-2 gap-5">
+                        <!-- Left: What is the Next Step? -->
+                        <div class="bg-white rounded-xl border border-border-color p-4 space-y-3">
+                            <div class="flex items-center gap-2 text-clinical-blue font-bold text-sm">
+                                <span class="material-symbols-outlined text-[20px]">near_me</span>
+                                <h4>What Is Your Next Step?</h4>
+                            </div>
+                            <div id="hist-next-urgency-box" class="p-3 rounded-lg text-xs font-medium space-y-1">
+                                <p id="hist-next-urgency-title" class="font-bold text-sm"></p>
+                                <p id="hist-next-urgency-desc" class="leading-relaxed"></p>
+                            </div>
+                            <div class="text-xs text-text-muted space-y-2 pt-1">
+                                <div class="flex items-start gap-2">
+                                    <span class="material-symbols-outlined text-clinical-blue text-[16px] mt-0.5 flex-shrink-0">event</span>
+                                    <div>
+                                        <p class="font-semibold text-text-primary">Next Screening Schedule:</p>
+                                        <p id="hist-next-schedule" class="mt-0.5"></p>
+                                    </div>
+                                </div>
+                                <div class="flex items-start gap-2 pt-1 border-t border-slate-100">
+                                    <span class="material-symbols-outlined text-clinical-blue text-[16px] mt-0.5 flex-shrink-0">medical_services</span>
+                                    <div>
+                                        <p class="font-semibold text-text-primary">Clinical Consultation Focus:</p>
+                                        <p id="hist-next-doctor" class="mt-0.5"></p>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+
+                        <!-- Right: Trajectory & Evolution Over Time -->
+                        <div class="bg-white rounded-xl border border-border-color p-4 space-y-3">
+                            <div class="flex items-center gap-2 text-clinical-orange font-bold text-sm">
+                                <span class="material-symbols-outlined text-[20px]">insights</span>
+                                <h4>Condition Trajectory & Progression</h4>
+                            </div>
+                            <div id="hist-trajectory-box" class="p-3 rounded-lg text-xs font-medium space-y-1">
+                                <p id="hist-trajectory-title" class="font-bold text-sm"></p>
+                                <p id="hist-trajectory-badge-desc" class="leading-relaxed"></p>
+                            </div>
+                            <div class="text-xs text-text-muted space-y-2 pt-1">
+                                <p id="hist-trajectory-detail" class="leading-relaxed"></p>
+                                <div id="hist-lesion-trend-row" class="hidden flex items-center justify-between p-2 rounded-lg bg-slate-50 text-xs">
+                                    <span class="font-medium text-text-primary">Lesion Coverage Trend:</span>
+                                    <span id="hist-lesion-trend-val" class="font-bold"></span>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- Recommended Measures & Actions -->
+                    <div class="space-y-3">
+                        <div class="flex items-center gap-2 text-text-primary font-bold text-sm">
+                            <span class="material-symbols-outlined text-clinical-green text-[20px]">health_and_safety</span>
+                            <h4>Clinical & Lifestyle Measures To Take</h4>
+                        </div>
+                        <ul id="hist-measures-list" class="grid grid-cols-1 md:grid-cols-2 gap-3 text-xs text-text-muted">
+                            <!-- Populated dynamically -->
+                        </ul>
+                    </div>
+
+                    <!-- Emergency Symptoms -->
+                    <div class="bg-amber-50 border border-amber-200 rounded-xl p-4 flex items-start gap-3">
+                        <span class="material-symbols-outlined text-amber-600 text-[22px] flex-shrink-0 mt-0.5">warning</span>
+                        <div class="space-y-1">
+                            <p class="text-xs font-bold text-amber-900">When to Seek Immediate Emergency Attention</p>
+                            <p id="hist-emergency-text" class="text-xs text-amber-800 leading-relaxed"></p>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
             <div class="bg-white rounded-lg border border-border-color shadow-sm">
                 <div class="bg-slate-50 px-4 py-3 border-b border-border-color flex items-center justify-between">
                     <h3 class="font-semibold text-text-primary">Diagnostic Timeline</h3>
@@ -949,6 +1053,7 @@ DASHBOARD_TEMPLATE = r"""<!DOCTYPE html>
 
         function renderHistory() {
             const feed = document.getElementById('history-feed');
+            const recCard = document.getElementById('hist-ai-recommendations');
             
             if (!historyData || historyData.length === 0) {
                 feed.innerHTML = '<div class="text-center text-text-muted py-8">No previous screenings found.</div>';
@@ -956,6 +1061,7 @@ DASHBOARD_TEMPLATE = r"""<!DOCTYPE html>
                 document.getElementById('hist-healthy').textContent = '0';
                 document.getElementById('hist-flagged').textContent = '0';
                 document.getElementById('hist-latest-date').textContent = '-';
+                if (recCard) recCard.classList.add('hidden');
                 return;
             }
 
@@ -1034,6 +1140,197 @@ DASHBOARD_TEMPLATE = r"""<!DOCTYPE html>
             
             const latest = new Date(historyData[0].timestamp);
             document.getElementById('hist-latest-date').textContent = latest.toLocaleDateString();
+
+            // Render the AI Longitudinal Care Plan & Clinical Recommendations
+            renderHistoryRecommendations(historyData);
+        }
+
+        // ══════════════════════════════════════════════════════════════════════
+        // renderHistoryRecommendations — Longitudinal AI Care Plan for Previous Results
+        // ══════════════════════════════════════════════════════════════════════
+        function renderHistoryRecommendations(history) {
+            const recCard = document.getElementById('hist-ai-recommendations');
+            if (!recCard || !history || history.length === 0) {
+                if (recCard) recCard.classList.add('hidden');
+                return;
+            }
+            recCard.classList.remove('hidden');
+
+            const total = history.length;
+            const normalCount = history.filter(h => h.gate === 'normal_gate').length;
+            const flaggedCount = total - normalCount;
+            const latest = history[0];
+            const earliest = history[history.length - 1];
+
+            const latestDate = new Date(latest.timestamp).toLocaleDateString(undefined, { year: 'numeric', month: 'short', day: 'numeric' });
+            const earliestDate = new Date(earliest.timestamp).toLocaleDateString(undefined, { year: 'numeric', month: 'short', day: 'numeric' });
+
+            const isNormal = latest.gate === 'normal_gate';
+            const latestGrade = isNormal ? -1 : (latest.severity_grade !== null && latest.severity_grade !== undefined ? latest.severity_grade : -1);
+            const latestGradeName = isNormal ? 'Normal (No DR)' : (latest.severity_name || 'Flagged for Review');
+
+            // 1. Screening Journey Overview
+            const titleEl = document.getElementById('hist-journey-title');
+            const descEl = document.getElementById('hist-journey-desc');
+            const statusPill = document.getElementById('hist-status-pill');
+
+            titleEl.textContent = `You have completed ${total} screening${total > 1 ? 's' : ''} to date`;
+            let journeyDetail = `${normalCount} screening${normalCount === 1 ? '' : 's'} showed healthy retinal findings, and ${flaggedCount} screening${flaggedCount === 1 ? '' : 's'} flagged retinal abnormalities.`;
+            if (total > 1 && latestDate !== earliestDate) {
+                journeyDetail += ` Monitoring history spans from ${earliestDate} to ${latestDate}.`;
+            } else {
+                journeyDetail += ` Baseline recorded on ${latestDate}.`;
+            }
+            descEl.textContent = journeyDetail;
+
+            // Status Pill
+            if (isNormal || latestGrade === 0) {
+                statusPill.className = 'flex-shrink-0 px-4 py-2 rounded-xl text-center font-bold text-xs bg-green-100 text-clinical-green border border-green-200';
+                statusPill.innerHTML = `Current Retina Status<br><span class="text-sm font-black">Normal — No DR</span>`;
+            } else if (latestGrade === 1) {
+                statusPill.className = 'flex-shrink-0 px-4 py-2 rounded-xl text-center font-bold text-xs bg-blue-100 text-clinical-blue border border-blue-200';
+                statusPill.innerHTML = `Current Retina Status<br><span class="text-sm font-black">Mild NPDR (Grade 1)</span>`;
+            } else if (latestGrade === 2) {
+                statusPill.className = 'flex-shrink-0 px-4 py-2 rounded-xl text-center font-bold text-xs bg-amber-100 text-amber-700 border border-amber-300';
+                statusPill.innerHTML = `Current Retina Status<br><span class="text-sm font-black">Moderate NPDR (Grade 2)</span>`;
+            } else if (latestGrade === 3) {
+                statusPill.className = 'flex-shrink-0 px-4 py-2 rounded-xl text-center font-bold text-xs bg-orange-100 text-clinical-orange border border-orange-300';
+                statusPill.innerHTML = `Current Retina Status<br><span class="text-sm font-black">Severe NPDR (Grade 3)</span>`;
+            } else if (latestGrade === 4) {
+                statusPill.className = 'flex-shrink-0 px-4 py-2 rounded-xl text-center font-bold text-xs bg-red-100 text-red-600 border border-red-300';
+                statusPill.innerHTML = `Current Retina Status<br><span class="text-sm font-black">Proliferative DR (Grade 4)</span>`;
+            } else {
+                statusPill.className = 'flex-shrink-0 px-4 py-2 rounded-xl text-center font-bold text-xs bg-orange-100 text-clinical-orange border border-orange-300';
+                statusPill.innerHTML = `Current Retina Status<br><span class="text-sm font-black">${latestGradeName}</span>`;
+            }
+
+            // 2. Next Step & Action Plan
+            const nextUrgencyBox = document.getElementById('hist-next-urgency-box');
+            const nextUrgencyTitle = document.getElementById('hist-next-urgency-title');
+            const nextUrgencyDesc = document.getElementById('hist-next-urgency-desc');
+            const nextSchedule = document.getElementById('hist-next-schedule');
+            const nextDoctor = document.getElementById('hist-next-doctor');
+
+            if (isNormal || latestGrade === 0) {
+                nextUrgencyBox.className = 'p-3 rounded-lg text-xs font-medium space-y-1 bg-green-50 border border-green-200 text-clinical-green';
+                nextUrgencyTitle.textContent = '✓ Routine Retinal Health: No Immediate Doctor Referral Needed';
+                nextUrgencyDesc.textContent = 'Your retinal vasculature is healthy with no microaneurysms, hemorrhages, or exudates. Regular annual screening is sufficient.';
+                nextSchedule.textContent = 'Schedule your next screening in 12 months. Diabetic retinopathy can develop quietly without vision changes, making annual checks essential.';
+                nextDoctor.textContent = 'Maintain standard annual comprehensive dilated eye exams with your optometrist or ophthalmologist.';
+            } else if (latestGrade === 1) {
+                nextUrgencyBox.className = 'p-3 rounded-lg text-xs font-medium space-y-1 bg-blue-50 border border-blue-200 text-clinical-blue';
+                nextUrgencyTitle.textContent = 'ℹ Low Urgency: Schedule An Ophthalmology Consultation within 6–9 Months';
+                nextUrgencyDesc.textContent = 'Early microaneurysms detected in your retinal capillaries. While vision is not currently impaired, medical monitoring is advised.';
+                nextSchedule.textContent = 'Re-screen in 6 months to establish if microaneurysms are multiplying or stable. If HbA1c is above 8%, re-screen in 4 months.';
+                nextDoctor.textContent = 'Request a dilated fundus examination. Discuss blood sugar and blood pressure optimization with your physician.';
+            } else if (latestGrade === 2) {
+                nextUrgencyBox.className = 'p-3 rounded-lg text-xs font-medium space-y-1 bg-amber-50 border border-amber-300 text-amber-800';
+                nextUrgencyTitle.textContent = '⚠ Moderate Urgency: Ophthalmologist Referral Advised within 3–6 Months';
+                nextUrgencyDesc.textContent = 'Multiple microaneurysms with dot-blot hemorrhages or lipid exudates detected. Capillary leakage is evident.';
+                nextSchedule.textContent = 'Re-screen in 3 to 4 months. Tracking progression velocity is critical to protect your central vision.';
+                nextDoctor.textContent = 'Request a dilated retinal exam and an Optical Coherence Tomography (OCT) scan to evaluate for diabetic macular edema (DME).';
+            } else if (latestGrade === 3) {
+                nextUrgencyBox.className = 'p-3 rounded-lg text-xs font-medium space-y-1 bg-orange-50 border border-orange-300 text-clinical-orange';
+                nextUrgencyTitle.textContent = '⚡ High Urgency: Prompt Ophthalmologist Appointment within 2–4 Weeks';
+                nextUrgencyDesc.textContent = 'Severe retinopathy features detected across retinal quadrants (hemorrhages, venous beading, IRMA). High risk of progressing to proliferative DR.';
+                nextSchedule.textContent = 'Follow-up clinical evaluations every 2 to 3 months under direct ophthalmological supervision.';
+                nextDoctor.textContent = 'Seek urgent retina specialist evaluation for panretinal photocoagulation (PRP) laser or intravitreal anti-VEGF injection planning.';
+            } else if (latestGrade === 4) {
+                nextUrgencyBox.className = 'p-3 rounded-lg text-xs font-medium space-y-1 bg-red-50 border border-red-300 text-red-600';
+                nextUrgencyTitle.textContent = '🚨 CRITICAL: Immediate Retina Specialist Referral Required within Days';
+                nextUrgencyDesc.textContent = 'Proliferative retinopathy with neovascular vessel proliferation. High danger of vitreous hemorrhage or tractional retinal detachment.';
+                nextSchedule.textContent = 'Intensive specialist monitoring every 4 to 8 weeks. Immediate therapeutic intervention required.';
+                nextDoctor.textContent = 'Emergency evaluation for panretinal laser photocoagulation (PRP), anti-VEGF therapy, or vitrectomy surgery.';
+            }
+
+            // 3. Trajectory Over Time
+            const trajBox = document.getElementById('hist-trajectory-box');
+            const trajTitle = document.getElementById('hist-trajectory-title');
+            const trajBadgeDesc = document.getElementById('hist-trajectory-badge-desc');
+            const trajDetail = document.getElementById('hist-trajectory-detail');
+            const lesionRow = document.getElementById('hist-lesion-trend-row');
+            const lesionVal = document.getElementById('hist-lesion-trend-val');
+
+            if (total === 1) {
+                trajBox.className = 'p-3 rounded-lg text-xs font-medium space-y-1 bg-slate-50 border border-slate-200 text-text-primary';
+                trajTitle.textContent = 'Initial Baseline Screening Established';
+                trajBadgeDesc.textContent = 'This is your first screening record in the database.';
+                trajDetail.textContent = 'Because you have 1 screening on record, a multi-point longitudinal trend cannot yet be computed. Your next scheduled screening will automatically generate comparative progression graphs and velocity metrics.';
+                lesionRow.classList.add('hidden');
+            } else {
+                const prev = history[1];
+                const prevDateStr = new Date(prev.timestamp).toLocaleDateString(undefined, { year: 'numeric', month: 'short', day: 'numeric' });
+                const prevIsNormal = prev.gate === 'normal_gate';
+                const prevGrade = prevIsNormal ? -1 : (prev.severity_grade !== null && prev.severity_grade !== undefined ? prev.severity_grade : -1);
+                const prevGradeName = prevIsNormal ? 'Normal' : (prev.severity_name || 'Flagged');
+
+                const gradeDelta = latestGrade - prevGrade;
+
+                // Lesion load change
+                let lesionDelta = null;
+                if (latest.lesion_load !== undefined && latest.lesion_load !== null && prev.lesion_load !== undefined && prev.lesion_load !== null) {
+                    lesionDelta = latest.lesion_load - prev.lesion_load;
+                }
+
+                if (gradeDelta > 0) {
+                    trajBox.className = 'p-3 rounded-lg text-xs font-medium space-y-1 bg-red-50 border border-red-200 text-red-700';
+                    trajTitle.textContent = '⚠ Condition Worsened (Progression Detected)';
+                    trajBadgeDesc.textContent = `Severity advanced from ${prevGradeName} to ${latestGradeName} since ${prevDateStr}.`;
+                    trajDetail.textContent = `Analysis of your last 2 screenings shows active progression. Vascular damage has expanded across the retina. This rate of progression underscores the need for tighter blood sugar management and prompt clinical review.`;
+                } else if (gradeDelta < 0) {
+                    trajBox.className = 'p-3 rounded-lg text-xs font-medium space-y-1 bg-green-50 border border-green-200 text-clinical-green';
+                    trajTitle.textContent = '✓ Positive Trend: Retinal Findings Improved';
+                    trajBadgeDesc.textContent = `Severity improved from ${prevGradeName} down to ${latestGradeName} since ${prevDateStr}.`;
+                    trajDetail.textContent = `Vascular signs have receded compared to your previous screening on ${prevDateStr}. This indicates excellent systemic response to glycemic, hypertensive, or therapeutic management.`;
+                } else {
+                    trajBox.className = 'p-3 rounded-lg text-xs font-medium space-y-1 bg-blue-50 border border-blue-200 text-clinical-blue';
+                    trajTitle.textContent = '→ Stable Retinal Condition';
+                    trajBadgeDesc.textContent = `Diagnosis has remained consistent (${latestGradeName}) between ${prevDateStr} and ${latestDate}.`;
+                    trajDetail.textContent = `No advancement in diabetic retinopathy grade was detected across your most recent screenings. Stable findings indicate that your current treatment regimen is keeping vascular disease in check.`;
+                }
+
+                if (lesionDelta !== null) {
+                    lesionRow.classList.remove('hidden');
+                    const diffPct = (lesionDelta * 100).toFixed(1);
+                    if (lesionDelta > 0.005) {
+                        lesionVal.className = 'font-bold text-red-600';
+                        lesionVal.textContent = `+${diffPct}% (Area Expanded)`;
+                    } else if (lesionDelta < -0.005) {
+                        lesionVal.className = 'font-bold text-clinical-green';
+                        lesionVal.textContent = `${diffPct}% (Area Decreased)`;
+                    } else {
+                        lesionVal.className = 'font-bold text-clinical-blue';
+                        lesionVal.textContent = `0.0% (Stable Area)`;
+                    }
+                } else {
+                    lesionRow.classList.add('hidden');
+                }
+            }
+
+            // 4. Measures List
+            const measuresList = document.getElementById('hist-measures-list');
+            const measures = [
+                { icon: 'monitor_heart', title: 'Target HbA1c < 7.0%', text: 'Strict glycemic control is the #1 medical intervention to arrest diabetic microvascular disease.' },
+                { icon: 'bloodtype', title: 'Blood Pressure < 130/80 mmHg', text: 'Hypertension accelerates capillary wall breakdown and doubles retinopathy progression rates.' },
+                { icon: 'lunch_dining', title: 'Low-Glycemic Diabetic Diet', text: 'Prioritize omega-3 fatty acids, leafy greens, and antioxidant-rich foods; eliminate refined sugars.' },
+                { icon: 'directions_run', title: '150 min/week Exercise', text: 'Moderate aerobic activity boosts insulin sensitivity and promotes microvascular endothelial health.' },
+                { icon: 'visibility', title: 'Daily Monocular Self-Check', text: 'Cover each eye separately once a day to immediately spot any focal blurriness or distortion.' },
+                { icon: 'fact_check', title: 'Maintain Screening Cadence', text: `Keep exact records of all ${total} screenings for review by your endocrinologist and ophthalmologist.` }
+            ];
+
+            measuresList.innerHTML = measures.map(m => `
+                <li class="p-3 bg-slate-50 rounded-xl border border-slate-100 flex items-start gap-2.5">
+                    <span class="material-symbols-outlined text-clinical-blue text-[18px] mt-0.5 flex-shrink-0">${m.icon}</span>
+                    <div>
+                        <p class="font-bold text-text-primary text-xs">${m.title}</p>
+                        <p class="text-xs text-text-muted mt-0.5 leading-relaxed">${m.text}</p>
+                    </div>
+                </li>
+            `).join('');
+
+            // 5. Emergency Symptoms Text
+            document.getElementById('hist-emergency-text').textContent =
+                'Go to an emergency eye clinic immediately if you experience: sudden painless vision loss in either eye, a sudden swarm of dark spots or floaters, bright flashes of light in peripheral vision, or a dark shadow/curtain pulling across your visual field. These can indicate acute vitreous hemorrhage or retinal tears.';
         }
 
         function generateReportFromHistory(index) {
