@@ -689,6 +689,62 @@ DASHBOARD_TEMPLATE = r"""<!DOCTYPE html>
                             </button>
                         </div>
 
+                        <!-- AI Clinical Recommendations Card -->
+                        <div id="ai-suggestions-card" class="hidden bg-white rounded-lg border border-border-color shadow-sm overflow-hidden">
+                            <div class="bg-slate-50 px-4 py-3 border-b border-border-color flex items-center gap-2">
+                                <span class="material-symbols-outlined text-clinical-blue text-[20px]">assistant</span>
+                                <h3 class="font-semibold text-text-primary text-sm">AI Clinical Recommendations</h3>
+                            </div>
+                            <div class="p-4 space-y-4">
+                                <!-- Referral Urgency Badge -->
+                                <div id="sug-urgency-box" class="flex items-center gap-3 p-3 rounded-lg">
+                                    <span id="sug-urgency-icon" class="material-symbols-outlined text-[24px]">schedule</span>
+                                    <div>
+                                        <p id="sug-urgency-title" class="text-sm font-bold"></p>
+                                        <p id="sug-urgency-desc" class="text-xs mt-0.5"></p>
+                                    </div>
+                                </div>
+
+                                <!-- Follow-up Timeline -->
+                                <div>
+                                    <p class="text-xs font-semibold text-text-primary mb-2 flex items-center gap-1.5">
+                                        <span class="material-symbols-outlined text-[16px] text-clinical-blue">event</span>
+                                        Recommended Follow-Up
+                                    </p>
+                                    <p id="sug-followup" class="text-xs text-text-muted leading-relaxed"></p>
+                                </div>
+
+                                <!-- Measures to Take -->
+                                <div>
+                                    <p class="text-xs font-semibold text-text-primary mb-2 flex items-center gap-1.5">
+                                        <span class="material-symbols-outlined text-[16px] text-clinical-green">health_and_safety</span>
+                                        Measures & Actions
+                                    </p>
+                                    <ul id="sug-measures" class="space-y-2 text-xs text-text-muted">
+                                        <!-- Populated dynamically -->
+                                    </ul>
+                                </div>
+
+                                <!-- History Trend Alert (only shown when comparison data exists) -->
+                                <div id="sug-trend-box" class="hidden rounded-lg p-3 space-y-2">
+                                    <p class="text-xs font-semibold flex items-center gap-1.5">
+                                        <span class="material-symbols-outlined text-[16px]">trending_up</span>
+                                        <span id="sug-trend-title">Progression Alert</span>
+                                    </p>
+                                    <p id="sug-trend-desc" class="text-xs leading-relaxed"></p>
+                                </div>
+
+                                <!-- Warning Symptoms -->
+                                <div class="bg-amber-50 border border-amber-200 rounded-lg p-3">
+                                    <p class="text-xs font-semibold text-amber-800 mb-1 flex items-center gap-1.5">
+                                        <span class="material-symbols-outlined text-[16px]">warning</span>
+                                        When to Seek Immediate Help
+                                    </p>
+                                    <p id="sug-warning-symptoms" class="text-xs text-amber-700 leading-relaxed"></p>
+                                </div>
+                            </div>
+                        </div>
+
                     </div>
 
                     <!-- Right Column: Visualizations -->
@@ -734,15 +790,59 @@ DASHBOARD_TEMPLATE = r"""<!DOCTYPE html>
                             </div>
                         </div>
 
-                        <!-- Clinical Findings -->
-                        <div class="p-4 border-t border-border-color bg-slate-50">
-                            <div class="flex gap-3 text-sm">
-                                <span class="material-symbols-outlined text-clinical-blue mt-0.5">info</span>
-                                <div>
-                                    <p class="font-medium text-text-primary mb-1">Clinical Findings</p>
-                                    <p class="text-text-muted mb-2"><span id="finding-grade" class="font-semibold"></span>. <span id="finding-lesion"></span></p>
-                                    <p class="italic text-xs text-slate-400">Disclaimer: This is an AI-assisted screening tool. Results should be verified by a qualified ophthalmologist.</p>
+                        <!-- Enhanced Clinical Findings Panel -->
+                        <div class="border-t border-border-color bg-white">
+                            <div class="px-4 py-3 border-b border-border-color flex items-center gap-2 bg-slate-50">
+                                <span class="material-symbols-outlined text-clinical-blue text-[20px]">clinical_notes</span>
+                                <h3 class="font-semibold text-text-primary text-sm">AI Clinical Findings</h3>
+                            </div>
+                            <div class="p-4 space-y-4" id="findings-container">
+                                <!-- Grade Summary -->
+                                <div class="flex items-start gap-3">
+                                    <div id="findings-icon-box" class="w-9 h-9 rounded-lg flex items-center justify-center flex-shrink-0 bg-slate-100">
+                                        <span id="findings-icon" class="material-symbols-outlined text-[20px] text-slate-500">visibility</span>
+                                    </div>
+                                    <div>
+                                        <p id="findings-grade-title" class="font-bold text-text-primary text-sm"></p>
+                                        <p id="findings-grade-desc" class="text-xs text-text-muted mt-1 leading-relaxed"></p>
+                                    </div>
                                 </div>
+
+                                <!-- Heatmap Interpretation -->
+                                <div id="findings-heatmap-section" class="bg-slate-50 rounded-lg p-3 space-y-2">
+                                    <p class="text-xs font-semibold text-text-primary flex items-center gap-1.5">
+                                        <span class="material-symbols-outlined text-[16px] text-clinical-orange">thermostat</span>
+                                        What the Heatmap Shows
+                                    </p>
+                                    <p id="findings-heatmap-text" class="text-xs text-text-muted leading-relaxed"></p>
+                                    <div class="flex items-center gap-2 mt-1">
+                                        <span class="text-xs text-text-muted font-medium">Lesion Load:</span>
+                                        <div class="flex-grow h-2 bg-slate-200 rounded-full overflow-hidden">
+                                            <div id="findings-lesion-bar" class="h-full bg-clinical-orange rounded-full transition-all" style="width: 0%"></div>
+                                        </div>
+                                        <span id="findings-lesion-pct" class="text-xs font-bold text-clinical-orange">0%</span>
+                                    </div>
+                                    <p id="findings-lesion-interpretation" class="text-xs text-text-muted italic"></p>
+                                </div>
+
+                                <!-- Key Observations -->
+                                <div>
+                                    <p class="text-xs font-semibold text-text-primary mb-2 flex items-center gap-1.5">
+                                        <span class="material-symbols-outlined text-[16px] text-clinical-blue">checklist</span>
+                                        Key Observations
+                                    </p>
+                                    <ul id="findings-observations" class="space-y-1.5 text-xs text-text-muted">
+                                        <!-- Populated dynamically -->
+                                    </ul>
+                                </div>
+
+                                <!-- Confidence Note -->
+                                <div id="findings-confidence-section" class="flex items-start gap-2 bg-blue-50 rounded-lg p-3">
+                                    <span class="material-symbols-outlined text-[16px] text-clinical-blue mt-0.5">psychology</span>
+                                    <p id="findings-confidence-text" class="text-xs text-clinical-blue leading-relaxed"></p>
+                                </div>
+
+                                <p class="italic text-[10px] text-slate-400 pt-1">Disclaimer: This is an AI-assisted screening tool. All findings must be verified by a qualified ophthalmologist before any clinical decisions are made.</p>
                             </div>
                         </div>
                     </div>
@@ -1189,9 +1289,9 @@ DASHBOARD_TEMPLATE = r"""<!DOCTYPE html>
             `;
             
             const visCol = document.getElementById('visual-column');
+            visCol.classList.remove('hidden');
+
             if(res.severity && res.cam_heatmap) {
-                visCol.classList.remove('hidden');
-                
                 document.getElementById('badge-lesion-load').textContent = (res.cam_lesion_load * 100).toFixed(1) + '%';
                 
                 const heatmapDataUrl = 'data:image/png;base64,' + res.cam_heatmap;
@@ -1202,13 +1302,22 @@ DASHBOARD_TEMPLATE = r"""<!DOCTYPE html>
                 document.getElementById('img-orig-single').style.backgroundImage = `url('${uploadedImageB64}')`;
                 document.getElementById('img-heat-single').style.backgroundImage = `url('${heatmapDataUrl}')`;
                 
-                document.getElementById('finding-grade').textContent = `Predicted: ${res.severity.grade_name}`;
-                document.getElementById('finding-lesion').textContent = `Grad-CAM analysis highlights areas contributing to the classification. Lesion load metric is ${(res.cam_lesion_load*100).toFixed(1)}%.`;
-                
                 switchView('side-by-side', document.querySelector('.view-btn'));
             } else {
-                visCol.classList.add('hidden');
+                // Normal retina: show original image and 0.0% lesion area
+                document.getElementById('badge-lesion-load').textContent = '0.0%';
+                document.getElementById('img-orig-sbs').style.backgroundImage = `url('${uploadedImageB64}')`;
+                document.getElementById('img-orig-single').style.backgroundImage = `url('${uploadedImageB64}')`;
+                document.getElementById('img-heat-sbs').style.backgroundImage = `url('${uploadedImageB64}')`;
+                document.getElementById('img-heat-single').style.backgroundImage = `url('${uploadedImageB64}')`;
+                switchView('original', document.querySelectorAll('.view-btn')[1] || document.querySelector('.view-btn'));
             }
+
+            // Populate the enhanced Clinical Findings panel (right side)
+            generateFindings(res);
+
+            // Populate the AI Clinical Recommendations card
+            generateSuggestions(res);
             
             if (!isRestoring) {
                 setTimeout(() => {
@@ -1232,6 +1341,343 @@ DASHBOARD_TEMPLATE = r"""<!DOCTYPE html>
             // Automatically refresh history from database so new record is immediately available
             if (!isRestoring) {
                 fetchHistory();
+            }
+        }
+
+        // ══════════════════════════════════════════════════════════
+        // generateFindings — Grade-specific clinical interpretations
+        // ══════════════════════════════════════════════════════════
+        function generateFindings(res) {
+            const grade = res.severity ? res.severity.grade : -1;
+            const gradeName = res.severity ? res.severity.grade_name : 'Unknown';
+            const confidence = res.severity ? res.severity.confidence_pct : 0;
+            const lesionLoad = res.cam_lesion_load || 0;
+            const lesionPct = (lesionLoad * 100).toFixed(1);
+            const isNormal = res.gate === 'normal_gate';
+
+            // Grade-specific data lookup
+            const gradeData = {
+                '-1': {
+                    title: 'Normal Retina — No Anomalies Detected',
+                    desc: 'The GANomaly anomaly detection gate found no abnormalities. The retinal vasculature appears normal with no microaneurysms, hemorrhages, or exudates detected.',
+                    icon: 'check_circle', iconBg: 'bg-green-100', iconColor: 'text-clinical-green',
+                    heatmap: 'No significant activation areas detected by Grad-CAM. The heatmap shows uniform low activation, indicating the AI did not identify any lesion-like patterns.',
+                    observations: [
+                        'Retinal blood vessels appear healthy with no signs of damage',
+                        'No microaneurysms or dot hemorrhages detected',
+                        'Optic disc and macula appear within normal limits',
+                        'No hard or soft exudates visible in the fundus image'
+                    ]
+                },
+                '0': {
+                    title: 'No Diabetic Retinopathy (Grade 0)',
+                    desc: 'No signs of diabetic retinopathy detected. The retinal vasculature appears normal with no microaneurysms, hemorrhages, or exudates identified by the classifier.',
+                    icon: 'check_circle', iconBg: 'bg-green-100', iconColor: 'text-clinical-green',
+                    heatmap: 'The Grad-CAM heatmap shows minimal activation. The AI examined the retinal vasculature and found no areas of concern. Warm colors (red/yellow) would indicate regions the AI focused on — their absence confirms a healthy retina.',
+                    observations: [
+                        'Retinal blood vessels show no signs of diabetic damage',
+                        'No microaneurysms or hemorrhages detected',
+                        'Macula and optic disc appear healthy',
+                        'No exudates or cotton-wool spots identified'
+                    ]
+                },
+                '1': {
+                    title: 'Mild Non-Proliferative DR (Grade 1)',
+                    desc: 'Mild NPDR detected — the earliest clinical stage of diabetic retinopathy. Small microaneurysms (tiny bulges in retinal blood vessels) have been identified. At this stage, vision is typically unaffected.',
+                    icon: 'info', iconBg: 'bg-blue-100', iconColor: 'text-clinical-blue',
+                    heatmap: 'The heatmap highlights small focal areas where the AI detected microaneurysms — tiny red dots caused by weakened blood vessel walls. Red/yellow regions on the heatmap correspond to these early vascular changes.',
+                    observations: [
+                        'Microaneurysms detected — tiny bulges in retinal capillaries',
+                        'Blood vessel walls showing early signs of weakening',
+                        'No significant hemorrhages or exudates at this stage',
+                        'Vision is typically unaffected, but monitoring is essential'
+                    ]
+                },
+                '2': {
+                    title: 'Moderate Non-Proliferative DR (Grade 2)',
+                    desc: 'Moderate NPDR detected. Multiple microaneurysms with dot/blot hemorrhages and possible hard exudates are visible. Blood vessels are showing significant stress from prolonged high blood sugar, and some vessels may be blocked.',
+                    icon: 'warning', iconBg: 'bg-amber-100', iconColor: 'text-amber-600',
+                    heatmap: 'The heatmap shows multiple scattered activation zones, indicating areas of hemorrhage, exudates, or vascular abnormalities. Bright red/yellow clusters correspond to damaged blood vessel regions. The spread of activation suggests disease affecting multiple quadrants.',
+                    observations: [
+                        'Multiple microaneurysms and dot/blot hemorrhages detected',
+                        'Possible hard exudates (lipid deposits) from leaking vessels',
+                        'Some retinal blood vessels may be blocked or narrowed',
+                        'Disease progression risk is significant without intervention',
+                        'Macular edema screening may be warranted'
+                    ]
+                },
+                '3': {
+                    title: 'Severe Non-Proliferative DR (Grade 3)',
+                    desc: 'Severe NPDR detected — a critical stage with high risk of progression to proliferative DR. Extensive hemorrhages, venous beading, and intraretinal microvascular abnormalities (IRMA) are present. Many blood vessels are blocked, starving the retina of blood supply.',
+                    icon: 'error', iconBg: 'bg-orange-100', iconColor: 'text-clinical-orange',
+                    heatmap: 'The heatmap shows extensive, widespread activation across large areas of the retina. This indicates significant pathology — hemorrhages in multiple quadrants, venous beading, and IRMA. The high density of warm colors reflects severe vascular damage requiring urgent attention.',
+                    observations: [
+                        'Extensive hemorrhages across multiple retinal quadrants',
+                        'Venous beading — veins with irregular, bead-like appearance',
+                        'Intraretinal microvascular abnormalities (IRMA) present',
+                        'High risk (>50%) of progressing to proliferative stage within 1 year',
+                        'Many retinal blood vessels are blocked, causing ischemia',
+                        'Urgent ophthalmologist referral strongly recommended'
+                    ]
+                },
+                '4': {
+                    title: 'Proliferative Diabetic Retinopathy (Grade 4)',
+                    desc: 'Proliferative DR detected — the most advanced and vision-threatening stage. Neovascularization (abnormal new blood vessel growth) has been triggered by severe retinal ischemia. These fragile new vessels can bleed into the vitreous, causing sudden vision loss or retinal detachment.',
+                    icon: 'emergency', iconBg: 'bg-red-100', iconColor: 'text-red-600',
+                    heatmap: 'The heatmap shows intense, widespread activation indicating neovascularization and severe pathology. The AI has identified areas where abnormal new blood vessels are growing — these are extremely fragile and prone to bleeding. This requires immediate clinical intervention.',
+                    observations: [
+                        'Neovascularization detected — new fragile blood vessels growing',
+                        'Risk of vitreous hemorrhage (bleeding into the eye\'s gel)',
+                        'Risk of tractional retinal detachment',
+                        'Possible neovascularization of the optic disc (NVD) or elsewhere (NVE)',
+                        'Laser photocoagulation or anti-VEGF injections likely needed',
+                        'Immediate ophthalmologist referral is critical',
+                        'Vision loss may be imminent without treatment'
+                    ]
+                }
+            };
+
+            const key = isNormal ? '-1' : String(grade);
+            const data = gradeData[key] || gradeData['0'];
+
+            // Populate grade summary
+            document.getElementById('findings-icon-box').className = `w-9 h-9 rounded-lg flex items-center justify-center flex-shrink-0 ${data.iconBg}`;
+            document.getElementById('findings-icon').className = `material-symbols-outlined text-[20px] ${data.iconColor}`;
+            document.getElementById('findings-icon').textContent = data.icon;
+            document.getElementById('findings-grade-title').textContent = data.title;
+            document.getElementById('findings-grade-desc').textContent = data.desc;
+
+            // Populate heatmap interpretation
+            const heatSection = document.getElementById('findings-heatmap-section');
+            if (isNormal && grade === -1) {
+                heatSection.classList.add('hidden');
+            } else {
+                heatSection.classList.remove('hidden');
+                document.getElementById('findings-heatmap-text').textContent = data.heatmap;
+                document.getElementById('findings-lesion-bar').style.width = lesionPct + '%';
+                document.getElementById('findings-lesion-pct').textContent = lesionPct + '%';
+
+                let lesionInterp = '';
+                if (lesionLoad < 0.05) lesionInterp = 'Very low lesion coverage — minimal retinal involvement.';
+                else if (lesionLoad < 0.15) lesionInterp = 'Mild lesion coverage — localized areas of concern.';
+                else if (lesionLoad < 0.30) lesionInterp = 'Moderate lesion coverage — significant retinal involvement detected.';
+                else if (lesionLoad < 0.50) lesionInterp = 'High lesion coverage — extensive pathology across the retina.';
+                else lesionInterp = 'Very high lesion coverage — widespread and severe retinal damage.';
+                document.getElementById('findings-lesion-interpretation').textContent = lesionInterp;
+            }
+
+            // Populate key observations
+            const obsList = document.getElementById('findings-observations');
+            obsList.innerHTML = data.observations.map(obs =>
+                `<li class="flex items-start gap-2"><span class="material-symbols-outlined text-[14px] ${data.iconColor} mt-0.5 flex-shrink-0">arrow_right</span><span>${obs}</span></li>`
+            ).join('');
+
+            // Populate confidence note
+            let confText = '';
+            if (confidence >= 90) {
+                confText = `High AI confidence (${confidence.toFixed(1)}%). The Bayesian neural network is very certain about this classification. The model\'s uncertainty is low, indicating a clear diagnostic signal.`;
+            } else if (confidence >= 75) {
+                confText = `Moderate AI confidence (${confidence.toFixed(1)}%). The model is fairly certain but shows some uncertainty. Clinical verification is recommended to confirm this result.`;
+            } else if (confidence >= 50) {
+                confText = `Lower AI confidence (${confidence.toFixed(1)}%). The model shows notable uncertainty — this could be a borderline case between adjacent grades. Professional clinical review is strongly advised.`;
+            } else {
+                confText = `Low AI confidence (${confidence.toFixed(1)}%). The model is uncertain about this classification. This result should be treated as preliminary and requires verification by a specialist.`;
+            }
+            document.getElementById('findings-confidence-text').textContent = confText;
+        }
+
+        // ══════════════════════════════════════════════════════════
+        // generateSuggestions — Clinical recommendations & history trends
+        // ══════════════════════════════════════════════════════════
+        function generateSuggestions(res) {
+            const card = document.getElementById('ai-suggestions-card');
+            card.classList.remove('hidden');
+
+            const grade = res.severity ? res.severity.grade : -1;
+            const isNormal = res.gate === 'normal_gate';
+            const confidence = res.severity ? res.severity.confidence_pct : 0;
+            const effectiveGrade = isNormal ? -1 : grade;
+
+            // Urgency, follow-up, measures lookup by grade (ICO/AAO guidelines)
+            const suggestions = {
+                '-1': {
+                    urgency: 'routine', urgencyTitle: 'Routine — No Referral Needed',
+                    urgencyDesc: 'No signs of diabetic retinopathy. Continue regular screening.',
+                    urgencyIcon: 'check_circle',
+                    urgencyBg: 'bg-green-50 border border-green-200',
+                    urgencyColor: 'text-clinical-green',
+                    followup: 'Schedule your next screening in 12 months. Annual fundus photography is recommended for all diabetic patients even when no retinopathy is detected, as the condition can develop at any time.',
+                    measures: [
+                        { icon: 'monitor_heart', text: 'Maintain HbA1c below 7% (53 mmol/mol) — tight glycemic control is the single most important factor in preventing DR' },
+                        { icon: 'bloodtype', text: 'Monitor blood sugar levels daily and keep a log for your doctor' },
+                        { icon: 'restaurant', text: 'Follow a balanced diabetic diet rich in green vegetables, omega-3 fatty acids, and low glycemic index foods' },
+                        { icon: 'directions_run', text: 'Regular moderate exercise (150 min/week) — helps improve insulin sensitivity and vascular health' },
+                        { icon: 'visibility', text: 'Report any sudden vision changes (floaters, blurriness, dark spots) to your doctor immediately' }
+                    ],
+                    warning: 'Seek immediate medical attention if you experience sudden vision loss, flashing lights, a shower of new floaters, or a dark curtain across your vision. These could indicate a retinal emergency.'
+                },
+                '0': {
+                    urgency: 'routine', urgencyTitle: 'Routine — No Referral Needed',
+                    urgencyDesc: 'No diabetic retinopathy detected by the classifier.',
+                    urgencyIcon: 'check_circle',
+                    urgencyBg: 'bg-green-50 border border-green-200',
+                    urgencyColor: 'text-clinical-green',
+                    followup: 'Re-screen in 12 months. Even though no DR is detected, annual monitoring is essential as diabetic retinopathy can develop gradually without symptoms.',
+                    measures: [
+                        { icon: 'monitor_heart', text: 'Maintain HbA1c below 7% — glycemic control is the best prevention against DR development' },
+                        { icon: 'bloodtype', text: 'Keep blood pressure under 130/80 mmHg — hypertension accelerates retinal damage' },
+                        { icon: 'no_smoking', text: 'Avoid smoking — it significantly increases the risk of diabetic eye complications' },
+                        { icon: 'restaurant', text: 'Eat a diet rich in antioxidants (leafy greens, berries, nuts) to support retinal health' },
+                        { icon: 'visibility', text: 'Perform self-checks: cover each eye separately to detect any vision differences early' }
+                    ],
+                    warning: 'Seek immediate medical attention if you experience sudden vision loss, flashing lights, a shower of new floaters, or a dark curtain across your vision.'
+                },
+                '1': {
+                    urgency: 'low', urgencyTitle: 'Low Urgency — Schedule Doctor Visit',
+                    urgencyDesc: 'Mild DR detected. See an ophthalmologist within 6-9 months.',
+                    urgencyIcon: 'event_upcoming',
+                    urgencyBg: 'bg-blue-50 border border-blue-200',
+                    urgencyColor: 'text-clinical-blue',
+                    followup: 'Schedule an ophthalmologist consultation within 6-9 months. Re-screen every 6-9 months to monitor for progression. If blood sugar control is poor (HbA1c > 8%), consider re-screening in 4-6 months.',
+                    measures: [
+                        { icon: 'monitor_heart', text: 'Intensify glycemic control — aim for HbA1c < 7%. Every 1% reduction in HbA1c reduces DR progression risk by ~40%' },
+                        { icon: 'bloodtype', text: 'Optimize blood pressure control (<130/80 mmHg) and lipid levels — both accelerate retinal damage' },
+                        { icon: 'medication', text: 'Discuss diabetes medication optimization with your endocrinologist' },
+                        { icon: 'restaurant', text: 'Anti-inflammatory diet: increase omega-3 intake (fish, flaxseed) and reduce refined sugars' },
+                        { icon: 'visibility', text: 'Monitor for any changes in vision — report blurriness, difficulty reading, or color changes' }
+                    ],
+                    warning: 'Seek immediate attention if you notice sudden vision changes, floaters, or blurry spots. While mild DR rarely causes vision problems, progression can occur rapidly with poor sugar control.'
+                },
+                '2': {
+                    urgency: 'moderate', urgencyTitle: 'Moderate Urgency — Doctor Referral Recommended',
+                    urgencyDesc: 'Moderate DR detected. Consult an ophthalmologist within 3-6 months.',
+                    urgencyIcon: 'calendar_clock',
+                    urgencyBg: 'bg-amber-50 border border-amber-200',
+                    urgencyColor: 'text-amber-700',
+                    followup: 'Schedule an ophthalmologist appointment within 3-6 months. Re-screen every 3-4 months to track progression. A comprehensive dilated eye exam is recommended to check for macular edema.',
+                    measures: [
+                        { icon: 'emergency', text: 'Urgent glycemic optimization needed — consult your endocrinologist about intensified insulin or medication adjustment' },
+                        { icon: 'monitor_heart', text: 'Strict blood pressure control (<130/80 mmHg) — hypertension doubles the rate of DR progression' },
+                        { icon: 'medication', text: 'Discuss potential benefit of fenofibrate therapy with your doctor — shown to slow DR progression' },
+                        { icon: 'bloodtype', text: 'Request full lipid panel — high cholesterol contributes to hard exudate formation' },
+                        { icon: 'ophthalmology', text: 'Request an OCT scan to check for diabetic macular edema (DME) — can develop at any DR stage' },
+                        { icon: 'restaurant', text: 'Strictly limit sodium, saturated fats, and high-glycemic carbohydrates' }
+                    ],
+                    warning: 'Seek immediate care if you experience sudden vision loss, significant increase in floaters, distorted vision (straight lines appearing wavy), or difficulty seeing in low light.'
+                },
+                '3': {
+                    urgency: 'high', urgencyTitle: 'High Urgency — Prompt Referral Required',
+                    urgencyDesc: 'Severe DR detected. See an ophthalmologist within 2-4 weeks.',
+                    urgencyIcon: 'priority_high',
+                    urgencyBg: 'bg-orange-50 border border-orange-300',
+                    urgencyColor: 'text-clinical-orange',
+                    followup: 'URGENT: Schedule an ophthalmologist appointment within 2-4 weeks. You are at high risk (>50%) of progressing to proliferative DR within 12 months. Frequent monitoring every 2-3 months is essential. Panretinal photocoagulation may be discussed.',
+                    measures: [
+                        { icon: 'emergency', text: 'Immediate endocrinology consultation — aggressive glycemic control is critical at this stage' },
+                        { icon: 'ophthalmology', text: 'Comprehensive dilated fundus exam + fluorescein angiography may be needed to assess vessel blockage' },
+                        { icon: 'monitor_heart', text: 'Aggressive blood pressure and lipid management — target BP < 130/80, LDL < 100 mg/dL' },
+                        { icon: 'medication', text: 'Discuss anti-VEGF therapy or panretinal photocoagulation (PRP) with your retina specialist' },
+                        { icon: 'visibility', text: 'Monitor vision daily using an Amsler grid — report any changes immediately' },
+                        { icon: 'do_not_disturb_on', text: 'Avoid strenuous activities that significantly raise blood pressure until seen by specialist' }
+                    ],
+                    warning: 'URGENT: Seek emergency eye care immediately if you experience sudden loss of vision, a dark curtain or shadow in your visual field, sudden increase in floaters, or flashing lights. At this stage, progression to vision-threatening complications can happen rapidly.'
+                },
+                '4': {
+                    urgency: 'critical', urgencyTitle: 'CRITICAL — Immediate Specialist Referral',
+                    urgencyDesc: 'Proliferative DR detected. See a retina specialist as soon as possible.',
+                    urgencyIcon: 'crisis_alert',
+                    urgencyBg: 'bg-red-50 border border-red-300',
+                    urgencyColor: 'text-red-600',
+                    followup: 'CRITICAL: Contact a retina specialist immediately (within days, not weeks). Proliferative DR with neovascularization requires urgent treatment — typically panretinal photocoagulation (PRP) or anti-VEGF injections — to prevent irreversible vision loss. Follow-up every 1-2 months.',
+                    measures: [
+                        { icon: 'crisis_alert', text: 'Immediate referral to a retina specialist — do not delay. Treatment within days can prevent permanent vision loss' },
+                        { icon: 'ophthalmology', text: 'Panretinal photocoagulation (PRP) laser treatment or intravitreal anti-VEGF injections are the standard treatments' },
+                        { icon: 'emergency', text: 'Emergency glycemic stabilization — avoid rapid swings in blood sugar which can worsen PDR' },
+                        { icon: 'medication', text: 'Your specialist may recommend vitrectomy surgery if vitreous hemorrhage or retinal detachment has occurred' },
+                        { icon: 'visibility', text: 'Check each eye separately DAILY — any new vision loss requires emergency treatment' },
+                        { icon: 'do_not_disturb_on', text: 'Avoid heavy lifting, straining, or any activity that raises eye pressure until treated' },
+                        { icon: 'monitor_heart', text: 'Maintain strict blood pressure and blood sugar control to slow further progression' }
+                    ],
+                    warning: 'EMERGENCY: Go to the nearest eye hospital immediately if you experience sudden vision loss in either eye, a large dark spot or shadow covering your vision, sudden shower of dark floaters, or eye pain with redness. These indicate possible vitreous hemorrhage or retinal detachment requiring emergency surgery.'
+                }
+            };
+
+            const key = String(effectiveGrade);
+            const sug = suggestions[key] || suggestions['0'];
+
+            // Urgency badge
+            const urgBox = document.getElementById('sug-urgency-box');
+            urgBox.className = `flex items-center gap-3 p-3 rounded-lg ${sug.urgencyBg}`;
+            document.getElementById('sug-urgency-icon').className = `material-symbols-outlined text-[24px] ${sug.urgencyColor}`;
+            document.getElementById('sug-urgency-icon').textContent = sug.urgencyIcon;
+            document.getElementById('sug-urgency-title').className = `text-sm font-bold ${sug.urgencyColor}`;
+            document.getElementById('sug-urgency-title').textContent = sug.urgencyTitle;
+            document.getElementById('sug-urgency-desc').className = `text-xs mt-0.5 ${sug.urgencyColor.replace('text-', 'text-').replace('-600', '-500').replace('-700', '-600')}`;
+            document.getElementById('sug-urgency-desc').textContent = sug.urgencyDesc;
+
+            // Follow-up
+            document.getElementById('sug-followup').textContent = sug.followup;
+
+            // Measures
+            const measList = document.getElementById('sug-measures');
+            measList.innerHTML = sug.measures.map(m =>
+                `<li class="flex items-start gap-2.5 p-2 bg-slate-50 rounded-lg">
+                    <span class="material-symbols-outlined text-[16px] text-clinical-blue mt-0.5 flex-shrink-0">${m.icon}</span>
+                    <span class="leading-relaxed">${m.text}</span>
+                </li>`
+            ).join('');
+
+            // Warning symptoms
+            document.getElementById('sug-warning-symptoms').textContent = sug.warning;
+
+            // History-based trend analysis
+            const trendBox = document.getElementById('sug-trend-box');
+            if (res.comparison) {
+                trendBox.classList.remove('hidden');
+                const comp = res.comparison;
+                const prevDate = comp.previous_date ? new Date(comp.previous_date).toLocaleDateString() : 'unknown date';
+
+                if (comp.grade_change === 'worsened') {
+                    trendBox.className = 'rounded-lg p-3 space-y-2 bg-red-50 border border-red-200';
+                    document.getElementById('sug-trend-title').className = 'text-red-700';
+                    document.getElementById('sug-trend-title').textContent = '⚠ Condition Worsened';
+                    let trendText = `Your DR grade has progressed from ${comp.previous_name} (Grade ${comp.previous_grade}) to ${comp.current_name} (Grade ${comp.current_grade}) since your screening on ${prevDate}.`;
+                    if (comp.lesion_load_diff !== null && comp.lesion_load_diff > 0) {
+                        trendText += ` Lesion area has increased by ${(comp.lesion_load_diff * 100).toFixed(1)}%.`;
+                    }
+                    trendText += ' This progression requires more frequent monitoring and possible treatment escalation. Consult your ophthalmologist promptly.';
+                    document.getElementById('sug-trend-desc').className = 'text-xs leading-relaxed text-red-700';
+                    document.getElementById('sug-trend-desc').textContent = trendText;
+                } else if (comp.grade_change === 'improved') {
+                    trendBox.className = 'rounded-lg p-3 space-y-2 bg-green-50 border border-green-200';
+                    document.getElementById('sug-trend-title').className = 'text-clinical-green';
+                    document.getElementById('sug-trend-title').textContent = '✓ Condition Improved';
+                    let trendText = `Good news — your DR grade has improved from ${comp.previous_name} (Grade ${comp.previous_grade}) to ${comp.current_name} (Grade ${comp.current_grade}) since ${prevDate}.`;
+                    if (comp.lesion_load_diff !== null && comp.lesion_load_diff < 0) {
+                        trendText += ` Lesion area decreased by ${Math.abs(comp.lesion_load_diff * 100).toFixed(1)}%.`;
+                    }
+                    trendText += ' Continue your current treatment plan and maintain strict blood sugar control.';
+                    document.getElementById('sug-trend-desc').className = 'text-xs leading-relaxed text-clinical-green';
+                    document.getElementById('sug-trend-desc').textContent = trendText;
+                } else {
+                    trendBox.className = 'rounded-lg p-3 space-y-2 bg-blue-50 border border-blue-200';
+                    document.getElementById('sug-trend-title').className = 'text-clinical-blue';
+                    document.getElementById('sug-trend-title').textContent = '→ Condition Stable';
+                    let trendText = `Your DR grade remains at ${comp.current_name} (Grade ${comp.current_grade}), unchanged since ${prevDate}.`;
+                    if (comp.lesion_load_diff !== null) {
+                        const diff = comp.lesion_load_diff * 100;
+                        if (Math.abs(diff) > 1) {
+                            trendText += ` Lesion area ${diff > 0 ? 'increased slightly' : 'decreased slightly'} by ${Math.abs(diff).toFixed(1)}%.`;
+                        } else {
+                            trendText += ' Lesion area is stable.';
+                        }
+                    }
+                    trendText += ' Continue your current management plan and maintain regular screening.';
+                    document.getElementById('sug-trend-desc').className = 'text-xs leading-relaxed text-clinical-blue';
+                    document.getElementById('sug-trend-desc').textContent = trendText;
+                }
+            } else {
+                trendBox.classList.add('hidden');
             }
         }
 
